@@ -18,68 +18,63 @@
 
 import os
 import ConfigParser
-from ConfigParser import RawConfigParser
+from ConfigParser import ConfigParser
 
-# Definitions
-POSIX = os.name == 'posix'
-CONFIG_FILE_NAME = 'umit_agent' + ('.conf' if POSIX else '.ini')
-if POSIX:
-    CONFIG_FILE_PATH = os.path.join('etc', CONFIG_FILE_NAME)
-else:
-    CONFIG_FILE_PATH = CONFIG_FILE_NAME
 
-GENERAL_SECTION = 'GeneralSettings'
+class AgentConfig(ConfigParser):
 
-# General settings standard options
-SERVER = 'Server'
+    default_server_addr = '127.0.0.1'
+    default_server_port = '20000'
+    default_server_encrypt_port = '20001'
+    default_encrypt_enabled = False
+
+    file_name = 'umit_agent.conf'
+    file_path = file_name
+
+# General section options
+    general_section = 'general_section'
+    server_addr = 'server_address'
+    encrypt_enabled = 'encryption_enabled'
+    server_port = 'server_port'
+    server_encrypt_port = 'server_encrypted_port'
 
 # Monitoring Modules standard options
-ENABLED = 'Enabled'
-PATH = 'Path'
+    module_enabled = 'enabled'
+    module_path = 'path'
 
-# Default options values
-DEFAULT_SERVER_ADDR = '127.0.0.1'
-DEFAULT_MODULES = (ModuleConfiguration('Device_Sensor', enabled = True),\
-                   ModuleConfiguration('Test_Module', enabled = False))
-
-
-class AgentConfiguration(RawConfigParser):
 
     def __init__(self, config_file_path = None):
+        ConfigParser.__init__(self)
+
+        self.config_file_path = config_file_path
         if config_file_path == None:
-            self.config_file_path = CONFIG_FILE_PATH
+            self._set_default_settings()
+        self.load_settings()
 
 
 # File handling methods
 
     def load_default_settings(self):
         self._clear_settings()
-
-        for module in DEFAULT_MODULES:
-            RawConfigParser.add_section(self, module.name)
-            RawConfigParser.set(self, module.name, ENABLED, module.enabled)
-            RawConfigParser.set(self, module.name, PATH, module.path)
-
-        RawConfigParser.add_section(self, GENERAL_SETTINGS)
-        RawConfigParser.set(self, GENERAL_SECTION, SERVER, DEFAULT_SERVER_ADDR)
+        self._set_default_settings()
 
 
     def load_settings(self):
         # Try to create the configuration file if it does not exist.
         # Also load the default settings and save them in that file.
-        if not os.path.is_file(self.config_file_path):
-            config_file = open(self.config_file_path)
+        if not os.path.isfile(self.config_file_path):
+            config_file = open(self.config_file_path, 'w')
             self.load_default_settings()
             self.save_settings()
-            RawConfigParser.readfp(self, config_file)
-        else
+            self.read(self.config_file_path)
+        else:
             config_file = open(self.config_file_path)
-            RawConfigParser.readfp(self, config_file)
+            self.readfp(config_file)
 
 
-    def save_settings(self, config_file_path = None):
-        config_file = open(self.config_file_path)
-        RawConfigParser.write(self, config_file)
+    def save_settings(self):
+        config_file = open(self.config_file_path, 'w')
+        self.write(config_file)
 
 
 # General options methods
@@ -95,71 +90,103 @@ class AgentConfiguration(RawConfigParser):
 # Module options methods
 
     def module_is_installed(self, module_name):
-        return RawConfigParser.has_section(self, module_name)
+        return self.has_section(module_name)
 
 
     def module_get_enable(self, module_name):
         if not self.module_is_installed(module_name):
-            error = AgentConfigurationError()
-            error.set_module_not_installed(module_name)
-            raise error
+            raise AgentConfig.ModuleNotInstalled(module_name)
 
-        return RawConfigParser.getboolean(self, module_name, ENABLED)
+        return self.getboolean(module_name, ENABLED)
 
 
     def module_set_enable(self, module_name, enable_value = True):
         if not self.module_is_installed(module_name):
-            error = AgentConfigurationError()
-            error.set_module_not_installed(module_name)
-            raise error
+            raise AgentConfig.ModuleNotInstalled(module_name)
 
-        RawConfigParser.set(self, module_name, ENABLED, enable_value)
+        self.set(module_name, ENABLED, enable_value)
 
 
     def module_get_path(self, module_name):
         if not self.module_is_installed(module_name):
-            error = AgentConfigurationError()
-            error.set_module_not_installed(module_name)
-            raise error
+            raise AgentConfig.ModuleNotInstalled(module_name)
 
-        return RawConfigParser.get(self, module_name, PATH)
+        return self.get(module_name, PATH)
 
 
     def module_set_path(self, module_name, path):
         if not self.module_is_installed(module_name):
-            error = AgentConfigurationError()
-            error.set_module_not_installed(module_name)
-            raise error
+            raise AgentConfig.ModuleNotInstalled(module_name)
 
-        RawConfigParser.set(self, module_name, PATH, path)
+        self.set(module_name, PATH, path)
+
+    def module_set_option(self, module_name, option_name, option_value):
+        if not self.module_is_installed(module_name):
+            raise AgentConfig.ModuleNotInstalled(module_name)
+
+        self.set(module_name, option_name, option_value)
+
+
+    def module_get_option(self, module_name, option_name):
+        if not self.module_is_installed(module_name):
+            raise AgentConfig.ModuleNotInstalled(module_name)
+
+        return self.get(module_name, option_name)
 
 
 # Private methods
 
     def _clear_settings(self):
-        sections = RawConfigParser.sections(self)
+        sections = self.sections()
         for section in sections:
-            RawConfigParser.remove_section(self, section)
+            self.remove_section(section)
+
+    def _set_default_settings(self):
+        # Fail-safe settings
+
+        # General settings
+        self.add_section(AgentConfig.general_section)
+        self.set(AgentConfig.general_section, AgentConfig.encrypt_enabled,\
+                AgentConfig.default_encrypt_enabled)
+        self.set(AgentConfig.general_section, AgentConfig.server_addr,\
+                AgentConfig.default_server_addr)
+        self.set(AgentConfig.general_section, AgentConfig.server_port,\
+                AgentConfig.default_server_port)
+        self.set(AgentConfig.general_section, AgentConfig.server_encrypt_port,\
+                AgentConfig.default_server_encrypt_port)
+
+        # Module default settings
+        self.add_section('DeviceSensor')
+        self.set('DeviceSensor', AgentConfig.module_path,\
+                os.path.join('umit', 'agent', 'monitoring_modules'))
+        self.set('DeviceSensor', AgentConfig.module_enabled, True)
+
+        self.add_section('TestModule')
+        self.set('TestModule', AgentConfig.module_path,\
+            os.path.join('umit', 'agent', 'monitoring_modules'))
+        self.set('TestModule', AgentConfig.module_enabled, True)
+
+        if os.name == 'posix':
+            AgentConfig.file_path = os.path.join('/etc', AgentConfig.file_name)
+        self.config_file_path = AgentConfig.file_path
 
 
+# Exceptions
 
-class AgentConfigurationError(Exception):
+    class ModuleNotInstalled(Exception):
 
-    def __init__(self, value = None):
-        self.error_message = value
+        def __init__(self, module_name):
+            self.err_message = 'Module ' + str(module_name) + ' not installed'
 
-
-    def set_module_not_installed(self, module_name):
-        self.error_message = 'Module ' + str(module_name) + ' not installed'
-
-
-    def __str__(self):
-        return repr(self.error_message)
+        def __str__(self):
+            return repr(self.err_message)
 
 
-class ModuleConfiguration:
+    class GeneralError(Exception):
 
-    def __init__(self, name, path = '.', enabled = False):
-        self.name = name
-        self.path = path
-        self.enabled = enabled
+        def __init__(self, value):
+            self.err_message = str(value)
+
+        def __str__(self):
+            return repr(self.err_message)
+
