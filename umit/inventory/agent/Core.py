@@ -18,6 +18,8 @@
 
 import threading
 
+from umit.inventory.agent.Configs import AgentConfig
+
 class AgentMainLoop:
 
     def __init__(self, message_parser):
@@ -88,7 +90,7 @@ class AgentMainLoop:
 
 
 
-class MessageParser:
+class AgentMessageParser:
 
     def __init__(self, configs):
         """

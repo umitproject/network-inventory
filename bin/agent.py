@@ -30,8 +30,12 @@ def main(args):
     # settings.
     configurations = Configs.AgentConfig()
 
+    # The message Parser which will encrypt (if specified) and send the 
+    # messages.
+    parser = Core.AgentMessageParser(configurations)
+
     # The event-based main loop of the Agent.
-    agent_main_loop = Core.AgentMainLoop()
+    agent_main_loop = Core.AgentMainLoop(parser)
     agent_main_loop.run()
 
 
