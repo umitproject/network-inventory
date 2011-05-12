@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Copyright (C) 2011 Adriano Monteiro Marques.
 #
 # Author: Dragos Dena <dragos.dena@gmail.com>
@@ -17,10 +18,22 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import sys
-from umit.agent.core import Configs
+from umit.inventory import agent
+from umit.inventory.agent import Configs
+from umit.inventory.agent import Core
 
 def main(args):
-    configurations = Configs.AgentConfiguration()
+    """The Umit Agent main function"""
+
+    # The Agent Configurations. See umit/inventory/agent/Configs.py
+    # for details regarding the configuration file location and default
+    # settings.
+    configurations = Configs.AgentConfig()
+
+    # The event-based main loop of the Agent.
+    agent_main_loop = Core.AgentMainLoop()
+    agent_main_loop.run()
+
 
 if __name__=="__main__":
     main(sys.argv)
