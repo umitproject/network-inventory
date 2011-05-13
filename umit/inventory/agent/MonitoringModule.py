@@ -20,7 +20,7 @@ import threading
 from threading import Thread
 
 from umit.inventory.agent import Core
-from umit.inventory.common import MessageParser
+from umit.inventory.common import NotificationParser
 
 
 class MonitoringModule(Thread):
@@ -57,7 +57,7 @@ read from the configuration file.
         msg_type: The type of the message. See umit.inventory.common
         fields: A dictionary with the module specific fields.
         """
-        notification = MessageParser.parse_message(message, msg_type. fields)
+        notification = NotificationParser.parse(message, msg_type, fields)
         self.agent_main_loop.add_message(notification)
 
 

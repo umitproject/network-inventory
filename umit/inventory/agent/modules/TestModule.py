@@ -1,4 +1,4 @@
-# Copyright (C) 2011 Adriano Monteiro Marques.
+#Copyright (C) 2011 Adriano Monteiro Marques.
 #
 # Author: Dragos Dena <dragos.dena@gmail.com>
 #
@@ -23,7 +23,7 @@ import time
 
 from umit.inventory.agent import Core
 from umit.inventory.agent.MonitoringModule import MonitoringModule
-from umit.inventory.common import MessageTypes
+from umit.inventory.common import NotificationTypes
 
 class TestModule(MonitoringModule):
 
@@ -31,7 +31,8 @@ class TestModule(MonitoringModule):
     min_time_config = "MinTimeConfig"
     max_time_config = "MaxTimeConfig"
     message_size = "MessageSize"
-
+    fields_num = "FieldsNumber"
+    fields_length = "FieldsLength"
 
     def __init__(self, configs, agent_main_loop):
         MonitoringModule.__init__(self, configs, agent_main_loop)
@@ -39,14 +40,16 @@ class TestModule(MonitoringModule):
         self.min_sleep_time = self.options[TestModule.min_time_config]
         self.max_sleep_time = self.options[TestModule.max_time_config]
         self.message_size = self.options[TestModule.message_size]
+        self.fields_num = self.options[TestModule.fields_num]
+        self.fields_length = self.options[TestModule.fields_length]
 
 
     def get_name(self):
         return "TestModule"
 
 
-    def generate_random_message(self):
-        """ Waits a random time and generates a random message"""
+    def _generate_random_message(self):
+        # Waits a random time and generates a random message.
         temp = random() * (self.max_sleep_time - self.min_sleep_time)
         sleep_time = self.min_sleep_time = temp
         time.sleep(sleep_time)
@@ -58,11 +61,37 @@ class TestModule(MonitoringModule):
         return msg
 
 
+    def _generate_random_type(self):
+        # Currently consider 12.5% chances to generate a CRITICAL notification.
+        i = choice(range(8))
+        if i == 0:
+            return NotificationTypes.critical
+        else:
+            return NotificationTypes.info
+
+
+    def _generage_random_fields(self):
+        # Generate random fields with self.fields_num entries and each field
+        # having exactly self.fields_length characters.
+        fields = dict()
+        for i in range(self.fields_num):
+            field_name = "Field" + str(i)
+            field_value = ''
+            for j in range(self.fields_length):
+                field_value += choice(string.ascii_uppercase)
+            fields[field_name] = field_value
+
+        return fields
+
+
     def start(self):
 
         while True:
-            msg = self.generate_random_message()
-            self.send_message(msg)
+            msg = self._generate_random_message()
+            msg_type = self._generate_random_type()
+            fields = self._generate_random_fields()
+
+            self.send_message(msg, msg_type, fields)
 
 
     def get_default_settings(self):
@@ -70,6 +99,8 @@ class TestModule(MonitoringModule):
         settings[TestModule.min_time_config] = '0.0'
         settings[TestModule.max_time_config] = '5.0'
         settings[TestModule.message_size] = '100'
+        settings[TestModule.fields_num] = '3'
+        settings[TestModule.fields_length] = '15'
 
         return settings
 
