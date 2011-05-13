@@ -64,3 +64,13 @@ class TestModule(MonitoringModule):
             msg = self.generate_random_message()
             self.send_message(msg)
 
+
+    def get_default_settings(self):
+        settings = dict()
+        settings[TestModule.min_time_config] = '0.0'
+        settings[TestModule.max_time_config] = '5.0'
+        settings[TestModule.message_size] = '100'
+
+        return settings
+
+

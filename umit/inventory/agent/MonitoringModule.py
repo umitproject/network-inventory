@@ -20,6 +20,8 @@ import threading
 from threading import Thread
 
 from umit.inventory.agent import Core
+from umit.inventory.common import MessageParser
+
 
 class MonitoringModule(Thread):
 """
@@ -47,16 +49,28 @@ read from the configuration file.
         pass
 
 
-    def send_message(self, message):
+    def send_message(self, message, msg_type, fields):
         """
         Used by the Monitoring Module which inherents this class
         to send the message to the Notifications Server.
+        message: The actual message text.
+        msg_type: The type of the message. See umit.inventory.common
+        fields: A dictionary with the module specific fields.
         """
-        self.agent_main_loop.add_message(message)
+        notification = MessageParser.parse_message(message, msg_type. fields)
+        self.agent_main_loop.add_message(notification)
 
 
     def start(self):
         """The Monitoring module main loop. Must be implemented."""
         pass
 
+
+    def get_default_settings(self):
+        """
+        Called by the main thread to get the module specific settings.
+        Should return a dictionary with (option_name, option_value)
+        Must be implemented.
+        """
+        pass
 
