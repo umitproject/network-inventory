@@ -143,6 +143,21 @@ class AgentConfig(ConfigParser):
         return self.get(module_name, option_name)
 
 
+    def module_set_options(self, module_name, option_dict, overwrite = True):
+        """
+        Used to set the options in option_dict, which is a dictionary with
+        entries of the type [option_name, option_value]. If overwrite is set
+        to False, any existing values will not be overwritten.
+        """
+        if not self.module_is_installed(module_name):
+            raise AgentConfig.ModuleNotInstalled(module_name)
+
+        for option_name in option_dict.keys():
+            if not overwrite and self.has_option(module_name, option_name)
+                continue
+            self.set(module_name, option_name, option_dict[option_name])
+
+
     # Private methods
 
     def _clear_settings(self):

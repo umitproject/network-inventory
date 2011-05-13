@@ -17,6 +17,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import threading
+import socket
 
 from umit.inventory.agent.Configs import AgentConfig
 
@@ -90,7 +91,7 @@ class AgentMainLoop:
 
 
 
-class AgentMessageParser:
+class AgentNotificationParser:
 
     def __init__(self, configs):
         """
@@ -104,11 +105,23 @@ class AgentMessageParser:
                 configs.get_general_option(AgentConfig.encrypt_enabled)
 
 
+    def _encrypt(self, message):
+        # Encrypts the message. TODO
+        return message
+
+
     def parse(self, message):
         """
         Encrypts the message if specified and then send it to the Notifications
         Server.
         """
-        pass
+        if self.encrypt_enabled:
+            sent_msg = self._encrypt(message)
+        else:
+            sent_msg = message
+
+        # Send the message trough UDP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.sendto(sent_msg, (self.server_addr, self.server_port))
 
 

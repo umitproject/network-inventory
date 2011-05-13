@@ -22,6 +22,7 @@ from umit.inventory import agent
 from umit.inventory.agent import Configs
 from umit.inventory.agent import Core
 
+
 def main(args):
     """The Umit Agent main function"""
 
@@ -32,7 +33,7 @@ def main(args):
 
     # The message Parser which will encrypt (if specified) and send the 
     # messages.
-    parser = Core.AgentMessageParser(configurations)
+    parser = Core.AgentNotificationParser(configurations)
 
     # The event-based main loop of the Agent.
     agent_main_loop = Core.AgentMainLoop(parser)
