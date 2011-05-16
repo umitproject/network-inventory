@@ -34,14 +34,15 @@ class TestModule(MonitoringModule):
     fields_num = "FieldsNumber"
     fields_length = "FieldsLength"
 
+
     def __init__(self, configs, agent_main_loop):
         MonitoringModule.__init__(self, configs, agent_main_loop)
 
-        self.min_sleep_time = self.options[TestModule.min_time_config]
-        self.max_sleep_time = self.options[TestModule.max_time_config]
-        self.message_size = self.options[TestModule.message_size]
-        self.fields_num = self.options[TestModule.fields_num]
-        self.fields_length = self.options[TestModule.fields_length]
+        self.min_sleep_time = float(self.options[TestModule.min_time_config])
+        self.max_sleep_time = float(self.options[TestModule.max_time_config])
+        self.message_size = int(self.options[TestModule.message_size])
+        self.fields_num = int(self.options[TestModule.fields_num])
+        self.fields_length = int(self.options[TestModule.fields_length])
 
 
     def get_name(self):
@@ -70,7 +71,7 @@ class TestModule(MonitoringModule):
             return NotificationTypes.info
 
 
-    def _generage_random_fields(self):
+    def _generate_random_fields(self):
         # Generate random fields with self.fields_num entries and each field
         # having exactly self.fields_length characters.
         fields = dict()
@@ -84,7 +85,7 @@ class TestModule(MonitoringModule):
         return fields
 
 
-    def start(self):
+    def run(self):
 
         while True:
             msg = self._generate_random_message()
@@ -94,14 +95,11 @@ class TestModule(MonitoringModule):
             self.send_message(msg, msg_type, fields)
 
 
-    def get_default_settings(self):
-        settings = dict()
-        settings[TestModule.min_time_config] = '0.0'
-        settings[TestModule.max_time_config] = '5.0'
-        settings[TestModule.message_size] = '100'
-        settings[TestModule.fields_num] = '3'
-        settings[TestModule.fields_length] = '15'
-
-        return settings
+    def init_default_settings(self):
+        self.options[TestModule.min_time_config] = '0.0'
+        self.options[TestModule.max_time_config] = '3.0'
+        self.options[TestModule.message_size] = '50'
+        self.options[TestModule.fields_num] = '3'
+        self.options[TestModule.fields_length] = '15'
 
 

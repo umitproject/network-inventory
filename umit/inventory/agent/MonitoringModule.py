@@ -24,21 +24,25 @@ from umit.inventory.common import NotificationParser
 
 
 class MonitoringModule(Thread):
-"""
-The interface which should be implemented by the monitoring modules.
+    """
+    The interface which should be implemented by the monitoring modules.
 
-self.options: A dictionary with the options for this module which are
-read from the configuration file.
-"""
+    self.options: A dictionary with the options for this module which are
+    read from the configuration file.
+    """
 
     def __init__(self, configs, agent_main_loop):
         Thread.__init__(self)
 
-        # Get the options from the configs and save them
+        # Initialize the default settings for this module. Will be
+        # overwritten by the next pargraph if they are set in the config file.
         self.options = dict()
+        self.init_default_settings()
+
+        # Get the options from the configs and save them
         module_config_options = configs.items(self.get_name())
         for option in module_config_options:
-            self.options[option[0]] = self.options[option[1]]
+            self.options[option[0]] = option[1]
 
         # Save the agent Main Loop which will get the Module's messages
         self.agent_main_loop = agent_main_loop
@@ -46,7 +50,7 @@ read from the configuration file.
 
     def get_name(self):
         """Must be implemented by the Monitoring Module"""
-        pass
+        return False
 
 
     def send_message(self, message, msg_type, fields):
@@ -61,16 +65,16 @@ read from the configuration file.
         self.agent_main_loop.add_message(notification)
 
 
-    def start(self):
+    def run(self):
         """The Monitoring module main loop. Must be implemented."""
         pass
 
-
-    def get_default_settings(self):
+    def init_default_settings(self):
         """
-        Called by the main thread to get the module specific settings.
-        Should return a dictionary with (option_name, option_value)
-        Must be implemented.
+        Sets in the self.options dictionary the default settings for this
+        module. Should be implemented by all the monitoring modules if they
+        have specific settings they expect, as if those settings aren't located
+        in the config file, an exception will be generated.
         """
         pass
 

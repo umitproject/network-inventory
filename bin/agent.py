@@ -18,8 +18,10 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import sys
+import traceback
+
 from umit.inventory import agent
-from umit.inventory.agent import Configs
+from umit.inventory.agent.Configs import AgentConfig
 from umit.inventory.agent import Core
 
 
@@ -29,14 +31,37 @@ def main(args):
     # The Agent Configurations. See umit/inventory/agent/Configs.py
     # for details regarding the configuration file location and default
     # settings.
-    configurations = Configs.AgentConfig()
+    conf = AgentConfig()
 
     # The message Parser which will encrypt (if specified) and send the 
     # messages.
-    parser = Core.AgentNotificationParser(configurations)
+    parser = Core.AgentNotificationParser(conf)
 
     # The event-based main loop of the Agent.
     agent_main_loop = Core.AgentMainLoop(parser)
+
+    # Initialize the monitoring modules
+    modules_names = conf.get_modules_list()
+    modules = []
+    for module_name in modules_names:
+        if not conf.module_get_enable(module_name):
+            continue
+        try:
+            module_path = conf.module_get_option(module_name,\
+                    AgentConfig.module_path)
+            module_obj = Core.load_module(module_name, module_path,\
+                    conf, agent_main_loop)
+        except Exception, e:
+            traceback.print_exc()
+            continue
+
+        modules.append(module_obj)
+
+    # Start the monitoring modules
+    for module in modules:
+        module.start()
+
+    # Start the main loop
     agent_main_loop.run()
 
 

@@ -18,6 +18,7 @@
 
 import json
 import time
+import socket
 
 class NotificationTypes:
 
@@ -44,7 +45,7 @@ class NotificationParser:
 
     @staticmethod
     def parse(message, msg_type, fields):
-    """Parses the message into the internal format (JSON)"""
+        """Parses the message into the internal format (JSON)"""
         message_obj = dict()
         message_obj[NotificationFields.message] = message
         message_obj[NotificationFields.message_type] = msg_type

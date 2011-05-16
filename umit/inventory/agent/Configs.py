@@ -41,7 +41,7 @@ class AgentConfig(ConfigParser):
     module_path = 'path'
 
 
-    def __init__(self, config_file_path = None):
+    def __init__(self, config_file_path=None):
         ConfigParser.__init__(self)
 
         self.config_file_path = config_file_path
@@ -98,6 +98,13 @@ class AgentConfig(ConfigParser):
 
     # Module options methods
 
+    def get_modules_list(self):
+        """Returns a list with the Module names located in the config file"""
+        modules_list = self.sections()
+        modules_list.remove(AgentConfig.general_section)
+        return modules_list
+
+
     def module_is_installed(self, module_name):
         """Returns True if module_name is installed. False otherwise"""
         return self.has_section(module_name)
@@ -112,10 +119,10 @@ class AgentConfig(ConfigParser):
         if not self.module_is_installed(module_name):
             raise AgentConfig.ModuleNotInstalled(module_name)
 
-        return self.getboolean(module_name, ENABLED)
+        return self.getboolean(module_name, AgentConfig.module_enabled)
 
 
-    def module_set_enable(self, module_name, enable_value = True):
+    def module_set_enable(self, module_name, enable_value=True):
         """
         Sets the module with the name module_name to be enabled if enable_value
         is True.
@@ -124,7 +131,7 @@ class AgentConfig(ConfigParser):
         if not self.module_is_installed(module_name):
             raise AgentConfig.ModuleNotInstalled(module_name)
 
-        self.set(module_name, ENABLED, enable_value)
+        self.set(module_name, AgentConfig.module_enabled, enable_value)
 
 
     def module_set_option(self, module_name, option_name, option_value):
@@ -143,7 +150,7 @@ class AgentConfig(ConfigParser):
         return self.get(module_name, option_name)
 
 
-    def module_set_options(self, module_name, option_dict, overwrite = True):
+    def module_set_options(self, module_name, option_dict, overwrite=True):
         """
         Used to set the options in option_dict, which is a dictionary with
         entries of the type [option_name, option_value]. If overwrite is set
@@ -153,7 +160,7 @@ class AgentConfig(ConfigParser):
             raise AgentConfig.ModuleNotInstalled(module_name)
 
         for option_name in option_dict.keys():
-            if not overwrite and self.has_option(module_name, option_name)
+            if not overwrite and self.has_option(module_name, option_name):
                 continue
             self.set(module_name, option_name, option_dict[option_name])
 
@@ -181,12 +188,12 @@ class AgentConfig(ConfigParser):
         # Module default settings
         self.add_section('DeviceSensor')
         self.set('DeviceSensor', AgentConfig.module_path,\
-                os.path.join('umit', 'agent', 'monitoring_modules'))
+                os.path.join('umit', 'inventory', 'agent', 'modules'))
         self.set('DeviceSensor', AgentConfig.module_enabled, True)
 
         self.add_section('TestModule')
         self.set('TestModule', AgentConfig.module_path,\
-            os.path.join('umit', 'agent', 'monitoring_modules'))
+            os.path.join('umit', 'inventory', 'agent', 'modules'))
         self.set('TestModule', AgentConfig.module_enabled, False)
 
         # TODO - may be uncommented later when we will have a clear idea where
