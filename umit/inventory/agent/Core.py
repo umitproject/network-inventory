@@ -148,14 +148,14 @@ def load_module(module_name, module_path, configs, agent_main_loop):
     # Try importing from the path. If we fail at this step, then the path
     # is invalid or we don't have permissions.
     try:
-        exec('import %s' % modname)
+        module_mod = __import__(modname, globals(), locals(), [module_name], -1)
     except:
         raise CorruptModule(module_name, module_path,\
                 CorruptModule.corrupt_path)
 
     # Try to get a reference to the class for this Monitoring Module.
     try:
-        mod_class = sys.modules[modname].__dict__[module_name]
+        mod_class = module_mod.__dict__[module_name]
     except:
         raise CorruptModule(module_name, module_path,\
                 CorruptModule.corrupt_file)
