@@ -50,7 +50,7 @@ class MonitoringModule(Thread):
 
     def get_name(self):
         """Must be implemented by the Monitoring Module"""
-        return False
+        raise MonitoringModule.NotImplemented('get_name')
 
 
     def send_message(self, message, msg_type, fields):
@@ -67,7 +67,8 @@ class MonitoringModule(Thread):
 
     def run(self):
         """The Monitoring module main loop. Must be implemented."""
-        pass
+        raise MonitoringModule.NotImplemented('run')
+
 
     def init_default_settings(self):
         """
@@ -77,4 +78,14 @@ class MonitoringModule(Thread):
         in the config file, an exception will be generated.
         """
         pass
+
+
+    class NotImplemented(Exception):
+
+        def __init__(self, func_name):
+            self.err_message = 'Method ' + func_name + '() must be implemented'
+            self.err_message += ' when extending the MonitoringModule class'
+
+        def __str__(self):
+            return repr(self.err_message)
 
