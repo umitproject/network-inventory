@@ -16,7 +16,10 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+import traceback
+
 from umit.inventory.server.Configs import ServerConfig
+from umit.inventory.server.Module import ListenerServerModule
 from umit.inventory.common import CorruptInventoryModule
 import umit.inventory.common
 
@@ -24,7 +27,6 @@ from twisted.internet import reactor
 
 
 class ServerCore:
-
 
     def __init__(self, configs):
         self.configs = configs
@@ -38,7 +40,7 @@ class ServerCore:
         modules_names = self.configs.get_modules_list()
 
         for module_name in modules_names:
-            if not conf.module_get_enable(module_name):
+            if not self.configs.module_get_enable(module_name):
                 continue
             try:
                 module_path = self.configs.module_get_option(module_name,\
@@ -67,7 +69,7 @@ class ServerCore:
         # Call the modules which implement ListenerServerModule so they
         # will start listening.
         for module in self.modules:
-            if isinstance(module, Module.ListenerServerModule):
+            if isinstance(module, ListenerServerModule):
                 module.listen()
 
         reactor.run()

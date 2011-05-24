@@ -21,6 +21,7 @@ import time
 import os
 import socket
 from ConfigParser import ConfigParser
+import traceback
 
 
 class NotificationTypes:
@@ -76,8 +77,8 @@ class InventoryConfig(ConfigParser):
 
     def __init__(self, config_file_path=None):
         ConfigParser.__init__(self)
-
         self.config_file_path = config_file_path
+
         if config_file_path == None:
             self._set_default_config_file()
 
@@ -138,7 +139,8 @@ class InventoryConfig(ConfigParser):
     def get_modules_list(self):
         """Returns a list with the Module names located in the config file"""
         modules_list = self.sections()
-        modules_list.remove(InventoryConfig.general_section)
+        if InventoryConfig.general_section in modules_list:
+            modules_list.remove(InventoryConfig.general_section)
         return modules_list
 
 
@@ -263,7 +265,8 @@ def load_module(module_name, module_path, *module_args):
     try:
         module_mod = __import__(modname, globals(),\
                 locals(), [module_name], -1)
-    except:
+    except Exception, e:
+        traceback.print_exc()
         raise CorruptInventoryModule(module_name, module_path,\
                 CorruptInventoryModule.corrupt_path)
 
@@ -287,7 +290,7 @@ class CorruptInventoryModule(Exception):
     An exception generated when the module couldn't be loaded. Generic cases:
         corrupt_path: The file called [module_name].py couldn't be located at
                       the specified path.
-        corrupt_file: The file [module_name[.py was found at the specified
+        corrupt_file: The file [module_name].py was found at the specified
                       path, but it didn't contained a class called
                       [module_name].
         get_name:     The module doesn't implement the mandatory get_name()
@@ -301,7 +304,7 @@ class CorruptInventoryModule(Exception):
         self.err_message = 'Module ' + str(module_name) + ':'
         if err_type == CorruptInventoryModule.corrupt_path:
             self.err_description = module_path + '/' + module_name + '.py' +\
-                    ' not found or missing permissions'
+                    ' not found, missing permissions or invalid syntax'
         elif err_type == CorruptInventoryModule.corrupt_file:
             self.err_description = module_path + '/' + module_name + '.py' +\
                     'doesn\'t contain a class called ' + module_name

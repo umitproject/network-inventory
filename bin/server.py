@@ -20,9 +20,25 @@
 import sys
 import traceback
 
+from umit.inventory import server
+from umit.inventory import common
+from umit.inventory.server.Configs import ServerConfig
+from umit.inventory.server.Core import ServerCore
+
 
 def main(args):
     """The Umit Notifications Server  main function"""
+
+    # The Server Configurations. See umit/inventory/agent/Configs.py
+    # for details regarding the configuration file location and default
+    # settings
+    conf = ServerConfig()
+
+    # Load the Core based on the configs.
+    core = ServerCore(conf)
+
+    # Run the Core.
+    core.run()
 
 
 if __name__=="__main__":

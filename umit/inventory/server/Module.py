@@ -17,7 +17,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 from umit.inventory.server.Configs import ServerConfig
-from umit.inventory.server.Core import ServerShell
+
 from twisted.internet.protocol import ServerFactory
 import twisted.internet.protocol
 
@@ -59,7 +59,7 @@ class ServerModule:
     class NotImplemented(Exception):
 
         def __init__(self, name):
-            self.err_msg = "Method " + str(name) "() must be implemented!"
+            self.err_msg = "Method " + str(name) + "() must be implemented!"
 
         def __str__(self):
             return repr(self.err_msg)

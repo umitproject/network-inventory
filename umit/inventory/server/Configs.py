@@ -31,29 +31,26 @@ class ServerConfig(InventoryConfig):
     general_section = 'GeneralSection'
     interface_port = 'InterfacePort'
 
-    # Listening Modules standard options
-    module_enabled = 'enabled'
-    module_path = 'path'
 
     def _set_default_settings(self):
         """Load default fail-safe settings"""
 
         # General settings
         self.add_section(InventoryConfig.general_section)
-        self.set(InventoryConfig.general_settings,\
+        self.set(InventoryConfig.general_section,\
                 ServerConfig.interface_port,\
                 ServerConfig.default_interface_port)
 
         # Module default settings
         self.add_section('AgentListener')
-        self.set('AgentListener', ServerConfig.module_path,\
+        self.set('AgentListener', InventoryConfig.module_path,\
                 os.path.join('umit', 'inventory', 'server', 'modules'))
-        self.set('AgentListener', ServerConfig.module_enabled, True))
+        self.set('AgentListener', InventoryConfig.module_enabled, True)
 
         self.add_section('SNMPListener')
-        self.set('SNMPListener', ServerConfig.module_path,\
+        self.set('SNMPListener', InventoryConfig.module_path,\
                 os.path.join('umit', 'inventory', 'server', 'modules'))
-        self.set('SNMPListener', ServerConfig.module_path, False))
+        self.set('SNMPListener', InventoryConfig.module_enabled, False)
 
 
     def _set_default_config_file(self):
