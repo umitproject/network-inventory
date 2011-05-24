@@ -19,8 +19,11 @@
 import threading
 import socket
 import sys
+import os
 
 from umit.inventory.agent.Configs import AgentConfig
+from umit.inventory.common import CorruptInventoryModule
+
 
 class AgentMainLoop:
 
@@ -131,75 +134,13 @@ class AgentNotificationParser:
         s.sendto(sent_msg, (self.server_addr, self.server_port))
 
 
+class CorruptAgentModule(CorruptInventoryModule):
 
-def load_module(module_name, module_path, configs, agent_main_loop):
-    """
-    Loads at runtime a monitoring module located in the file called
-    [module_name].py at the path specified by module_path. In the file
-    there must be a class which extends the MonitoringModule class and which
-    is called [module_name].
-    """
-    path_tokens = module_path.split('/') #TODO - for Windows
-    modname = ''
-    for path_token in path_tokens:
-        modname += path_token + '.'
-    modname += module_name
-
-    # Try importing from the path. If we fail at this step, then the path
-    # is invalid or we don't have permissions.
-    try:
-        module_mod = __import__(modname, globals(), locals(), [module_name], -1)
-    except:
-        raise CorruptModule(module_name, module_path,\
-                CorruptModule.corrupt_path)
-
-    # Try to get a reference to the class for this Monitoring Module.
-    try:
-        mod_class = module_mod.__dict__[module_name]
-    except:
-        raise CorruptModule(module_name, module_path,\
-                CorruptModule.corrupt_file)
-
-    # Initialize the object and test it's corectness
-    module_obj = mod_class(configs, agent_main_loop)
-    if module_obj.get_name() != module_name:
-        raise CorruptModule(module_name, module_path,\
-                CorruptModule.get_name)
-
-    return module_obj
-
-
-class CorruptModule(Exception):
-    """
-    An exception generated when the module couldn't be loaded. Cases:
-    corrupt_path: The file called [module_name].py couldn't be located at the
-                  specified path.
-    corrupt_file: The file [module_name].py was found at the specified path,
-                  but it didn't contained a class called [module_name].
-    get_name:     The module doesn't implement the get_name() function or the
-                  result is incorrect.
-    """
-
-    corrupt_path = 0
-    corrupt_file = 1
     get_name = 2
 
     def __init__(self, module_name, module_path, err_type=0):
-        self.err_message = 'Module ' + str(module_name) + ' fatal error: '
-        if err_type == CorruptModule.corrupt_path:
-            self.err_description = module_path + '/' + module_name + '.py' +\
-                    ' not found or missing permissions'
-        elif err_type == CorruptModule.corrupt_file:
-            self.err_description = module_path + '/' + module_name + '.py' +\
-                    ' doesn\'t contain a class called ' + module_name
-        elif err_type == CorruptModule.get_name:
-            self.err_description = module_name + ' doesn\'t implement the\
-                    get_name() method or it\'s return value is incorrect'
-        else:
-            self.err_description = 'Undefined error'
-
-
-    def __str__(self):
-        return repr(self.err_message + self.err_description)
-
-
+        CorruptInventoryModule.__init__(self, module_name,\
+                module_path, err_type)
+        if err_type == get_name:
+            self.err_description = module_name + 'doesn\'t implement' +\
+                    'the get_name() or it\'s return value is incorrect'

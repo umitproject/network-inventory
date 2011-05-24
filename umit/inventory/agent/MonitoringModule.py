@@ -61,7 +61,8 @@ class MonitoringModule(Thread):
         msg_type: The type of the message. See umit.inventory.common
         fields: A dictionary with the module specific fields.
         """
-        notification = NotificationParser.parse(message, msg_type, fields)
+        notification = NotificationParser.parse(message, msg_type,\
+                fields, self.get_name())
         self.agent_main_loop.add_message(notification)
 
 

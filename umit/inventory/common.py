@@ -47,12 +47,13 @@ class NotificationFields:
 class NotificationParser:
 
     @staticmethod
-    def parse(message, msg_type, fields):
+    def parse(message, msg_type, fields, module):
         """Parses the message into the internal format (JSON)"""
         message_obj = dict()
         message_obj[NotificationFields.message] = message
         message_obj[NotificationFields.message_type] = msg_type
         message_obj[NotificationFields.timestamp] = time.time()
+        message_obj[NotificationFields.monitoring_module] = module
         # TODO : get the IP address of the Host
         message_obj[NotificationFields.source_host] = socket.gethostname()
         message_obj[NotificationFields.module_fields] = dict()
@@ -212,7 +213,7 @@ class InventoryConfig(ConfigParser):
     def _set_default_settings(self):
         """Load default fail-save settings"""
         pass
-        
+
     def _set_default_config_file(self):
         """Sets the default configuration file"""
         pass
@@ -245,5 +246,70 @@ class InventoryConfig(ConfigParser):
 
         def __str__(self):
             return repr(self.err_message)
+
+
+
+def load_module(module_name, module_path, *module_args):
+    """Loads a module with the given name from the given path."""
+
+    path_tokens = module_path.split('/') # TODO - for Windows
+    modname = ''
+    for path_token in path_tokens:
+        modname += path_token + '.'
+    modname += module_name
+
+    # Try importing from the path. If we fail at this step then the path is
+    # invalid or we don't have permissions.
+    try:
+        module_mod = __import__(modname, globals(),\
+                locals(), [module_name], -1)
+    except:
+        raise CorruptInventoryModule(module_name, module_path,\
+                CorruptInventoryModule.corrupt_path)
+
+    # Try to get a reference to the class of this Module.
+    try:
+        mod_class = module_mod.__dict__[module_name]
+    except:
+        raise CorruptInventoryModule(module_name, module_path,\
+                CorruptInventoryModule.corrupt_file)
+
+    # Return the initialized object
+    return mod_class(*module_args)
+
+
+
+class CorruptInventoryModule(Exception):
+    """
+    It is inherited by specific Exception classes for the Agent and Server
+    modules.
+
+    An exception generated when the module couldn't be loaded. Generic cases:
+        corrupt_path: The file called [module_name].py couldn't be located at
+                      the specified path.
+        corrupt_file: The file [module_name[.py was found at the specified
+                      path, but it didn't contained a class called
+                      [module_name].
+        get_name:     The module doesn't implement the mandatory get_name()
+                      method or it's result is incorrect.
+    """
+
+    corrupt_path = 0
+    corrupt_file = 1
+
+    def __init__(self, module_name, module_path, err_type=0):
+        self.err_message = 'Module ' + str(module_name) + ':'
+        if err_type == CorruptInventoryModule.corrupt_path:
+            self.err_description = module_path + '/' + module_name + '.py' +\
+                    ' not found or missing permissions'
+        elif err_type == CorruptInventoryModule.corrupt_file:
+            self.err_description = module_path + '/' + module_name + '.py' +\
+                    'doesn\'t contain a class called ' + module_name
+        else:
+            self.err_description = 'Undefined error'
+
+
+    def __str__(self):
+        return repr(self.err_message + self.err_description)
 
 

@@ -46,7 +46,7 @@ class TestModule(MonitoringModule):
 
 
     def get_name(self):
-        return "TestModule"
+        return 'TestModule'
 
 
     def _generate_random_message(self):
