@@ -29,7 +29,7 @@ class ServerConfig(InventoryConfig):
 
     # General section options
     general_section = 'GeneralSection'
-    interface_port = 'InterfacePort'
+    interface_port = 'interface_port'
 
 
     def _set_default_settings(self):

@@ -28,8 +28,8 @@ from twisted.internet.protocol import DatagramProtocol
 class AgentListener(ListenerServerModule):
 
     # Options
-    udp_port_option = 'ListeningUDPPort'
-    ssl_port_option = 'ListeningSSLPort'
+    udp_port_option = 'listening_udp_port'
+    ssl_port_option = 'listening_ssl_port'
 
 
     def __init__(self, configs, shell):
