@@ -16,6 +16,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+import json
 
 class Notification:
     """
@@ -72,7 +73,8 @@ class Notification:
         if custom_fields != None:
             # Check if it's JSON seriazable.
             try:
-                temp = json.dumps()
+                temp = json.dumps(custom_fields)
+                self.custom_fields = custom_fields
             except:
                 raise CorruptCustom(custom_fields)
         else:
@@ -91,7 +93,7 @@ class Notification:
         db_obj[NotificationFields.protocol] = self.protocol
         db_obj[NotificationFields.type] = self.type
         db_obj[NotificationFields.description] = self.description
-        db_obj[NotificationFields.custom_fields = self.custom_fields
+        db_obj[NotificationFields.custom_fields] = self.custom_fields
 
         return db_obj
 

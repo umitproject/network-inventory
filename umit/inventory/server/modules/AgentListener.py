@@ -29,6 +29,7 @@ from twisted.internet.protocol import ServerFactory
 from twisted.internet.protocol import DatagramProtocol
 
 import traceback
+import json
 
 
 class AgentListener(ListenerServerModule):
@@ -84,7 +85,7 @@ class AgentListener(ListenerServerModule):
             standard_fields[NotificationFields.description] =\
                     temp[AgentNotificationFields.message]
 
-            custom_fields[AgentNotificationFields.monitoring_module =\
+            custom_fields[AgentNotificationFields.monitoring_module] =\
                     temp[AgentNotificationFields.monitoring_module]
             custom_fields[AgentNotificationFields.module_fields] =\
                     temp[AgentNotificationFields.module_fields]

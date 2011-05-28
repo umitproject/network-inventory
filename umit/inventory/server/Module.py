@@ -47,6 +47,15 @@ class ServerModule:
         raise ServerModule.NotImplemented('get_name')
 
 
+    def get_protocol_name(self):
+        """
+        Return the name of the protocol used for this Listening Module.
+        See umit.inventory.server.Notification.
+        Must be implemented.
+        """
+        raise ServerModule.NotImplemented('get_protocol_name')
+
+
     def init_default_settings(self):
         """
         Sets in the self.options dictionary the default settings for this

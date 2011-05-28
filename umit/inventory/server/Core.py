@@ -17,11 +17,13 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import traceback
+import json
 
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.server.Module import ListenerServerModule
 from umit.inventory.common import CorruptInventoryModule
 import umit.inventory.common
+from umit.inventory.server.Notification import Notification
 
 from twisted.internet import reactor
 
@@ -118,7 +120,7 @@ class ServerShell:
         listener will receive notifications.
         """
         # TODO
-        print message
+        print message.encode()
 
 
     def query_db(self, search_dict):
