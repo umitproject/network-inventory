@@ -19,10 +19,16 @@
 
 from umit.inventory.server.Core import ServerShell
 from umit.inventory.server.Module import ListenerServerModule
+from umit.inventory.server.Notification import Notification
+from umit.inventory.server.Notification import NotificationFields
+import umit.inventory.server.Notification
+from umit.inventory.common import AgentNotificationFields
 
 from twisted.internet import reactor
 from twisted.internet.protocol import ServerFactory
 from twisted.internet.protocol import DatagramProtocol
+
+import traceback
 
 
 class AgentListener(ListenerServerModule):
@@ -43,14 +49,55 @@ class AgentListener(ListenerServerModule):
         return 'AgentListener'
 
 
+    def get_protocol_name(self):
+        return 'UmitAgent'
+
+
     def init_default_settings(self):
         self.options[AgentListener.udp_port_option] = '20000'
         self.options[AgentListener.ssl_port_option] = '20001'
 
 
     def receive_message(self, host, port, data):
-        # TODO: Eventual parsing.
-        self.shell.save_message(data)
+        try:
+            temp = json.loads(data)
+        except Exception, e:
+            traceback.print_exc()
+            # TODO: Log this
+
+        # Must be careful, as it may be invalid and not contain all the fields.
+        standard_fields = dict()
+        custom_fields = dict()
+        try:
+            standard_fields[NotificationFields.source_host] =\
+                    temp[AgentNotificationFields.source_host]
+
+            standard_fields[NotificationFields.timestamp] =\
+                    temp[AgentNotificationFields.timestamp]
+
+            standard_fields[NotificationFields.protocol] =\
+                    self.get_protocol_name()
+
+            standard_fields[NotificationFields.type] =\
+                    temp[AgentNotificationFields.message_type]
+
+            standard_fields[NotificationFields.description] =\
+                    temp[AgentNotificationFields.message]
+
+            custom_fields[AgentNotificationFields.monitoring_module =\
+                    temp[AgentNotificationFields.monitoring_module]
+            custom_fields[AgentNotificationFields.module_fields] =\
+                    temp[AgentNotificationFields.module_fields]
+        except Exception, e:
+            traceback.prin_exc()
+            # TODO: Log this
+
+        try:
+            notification = Notification(standard_fields, custom_fields)
+            self.shell.save_message(notification)
+        except Exception, e:
+            traceback.print_exc()
+            # TODO: Log this
 
 
     def listen(self):
