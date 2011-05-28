@@ -37,12 +37,11 @@ class Notification:
     * type: The type of the notification. See
       umit.inventory.common.NotificationTypes.
     * description: A short description of the notification.
-    * custom_fields: Custom fields for this notification. A parser should
-      be passed in the notification constructor to decode this field.
+    * custom_fields: Custom fields for this notification. It should be a dictionary
+      that is JSON seriazable.
     """
 
-    def __init__(self, standard_fields, custom_fields=None,\
-            custom_fields_parser=None):
+    def __init__(self, standard_fields, custom_fields=None):
         """ Initializes a notification message. """
 
         # Perform the fields sanity check
@@ -73,18 +72,11 @@ class Notification:
 
         # If there are custom fields, check if they are valid and add them.
         if custom_fields != None:
+            # Check if it's JSON seriazable.
             try:
-                self.custom_fields = custom_fields_parser.parse(custom_fields)
+                temp = json.dumps()
             except:
-                raise CorruptParser(custom_fields_parser)
-
-            try:
-                # Check if it's JSON seriazable.
-                try:
-                    temp = json.dumps()
-                except:
-                    raise CorruptCustom(custom_fields)
-
+                raise CorruptCustom(custom_fields)
         else:
             self.custom_fields = dict()
 
@@ -123,14 +115,7 @@ class Notification:
         except:
             raise MissingNotificationFields(NotificationFields.custom_fields)
 
-
-        # We are omitting the custom_fields since we don't have a parser.
-        notification_obj = Notification(db_obj)
-        # Put the custom_fields manually.
-        notification_obj.custom_fields =\
-                db_obj[NotificationFields.custom_fields]
-
-        return notification_obj
+        return Notification(db_obj, custom_fields)
 
 
 
@@ -153,15 +138,6 @@ class MissingNotificationFields(Exception):
     def __str__(self):
         return repr(self.err_msg)
 
-
-
-class CorruptParser(Exception):
-
-    def __init__(self, fields_parser):
-        self.err_msg = str(fields_parser) + ' is corrupt.'
-
-    def __str__(self):
-        return repr(self.err_msg)
 
 
 class CorruptCustom(Exception):
