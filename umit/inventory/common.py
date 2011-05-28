@@ -34,7 +34,7 @@ class NotificationTypes:
 
 
 
-class NotificationFields:
+class AgentNotificationFields:
 
     source_host = 'SourceHost'
     timestamp = 'Timestamp'
@@ -45,21 +45,22 @@ class NotificationFields:
 
 
 
-class NotificationParser:
+class AgentNotificationParser:
+    """ The Notification Parser for the Umit Agent """
 
     @staticmethod
     def parse(message, msg_type, fields, module):
         """Parses the message into the internal format (JSON)"""
         message_obj = dict()
-        message_obj[NotificationFields.message] = message
-        message_obj[NotificationFields.message_type] = msg_type
-        message_obj[NotificationFields.timestamp] = time.time()
-        message_obj[NotificationFields.monitoring_module] = module
+        message_obj[AgentNotificationFields.message] = message
+        message_obj[AgentNotificationFields.message_type] = msg_type
+        message_obj[AgentNotificationFields.timestamp] = time.time()
+        message_obj[AgentNotificationFields.monitoring_module] = module
         # TODO : get the IP address of the Host
-        message_obj[NotificationFields.source_host] = socket.gethostname()
-        message_obj[NotificationFields.module_fields] = dict()
+        message_obj[AgentNotificationFields.source_host] = socket.gethostname()
+        message_obj[AgentNotificationFields.module_fields] = dict()
         for i in fields.keys():
-            message_obj[NotificationFields.module_fields][i] = fields[i]
+            message_obj[AgentNotificationFields.module_fields][i] = fields[i]
 
         return json.dumps(message_obj)
 
