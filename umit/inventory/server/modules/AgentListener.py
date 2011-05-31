@@ -19,6 +19,7 @@
 
 from umit.inventory.server.Core import ServerShell
 from umit.inventory.server.Module import ListenerServerModule
+from umit.inventory.server.Module import ServerModule
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 import umit.inventory.server.Notification
@@ -32,7 +33,7 @@ import traceback
 import json
 
 
-class AgentListener(ListenerServerModule):
+class AgentListener(ListenerServerModule, ServerModule):
 
     # Options
     udp_port_option = 'listening_udp_port'
@@ -40,7 +41,7 @@ class AgentListener(ListenerServerModule):
 
 
     def __init__(self, configs, shell):
-        ListenerServerModule.__init__(self, configs, shell)
+        ServerModule.__init__(self, configs, shell)
 
         self.udp_port = int(self.options[AgentListener.udp_port_option])
         self.ssl_port = int(self.options[AgentListener.ssl_port_option])
@@ -95,7 +96,7 @@ class AgentListener(ListenerServerModule):
 
         try:
             notification = Notification(standard_fields, custom_fields)
-            self.shell.save_message(notification)
+            self.shell.parse_notification(self.get_name(), notification)
         except Exception, e:
             traceback.print_exc()
             # TODO: Log this

@@ -47,15 +47,6 @@ class ServerModule:
         raise ServerModule.NotImplemented('get_name')
 
 
-    def get_protocol_name(self):
-        """
-        Return the name of the protocol used for this Listening Module.
-        See umit.inventory.server.Notification.
-        Must be implemented.
-        """
-        raise ServerModule.NotImplemented('get_protocol_name')
-
-
     def init_default_settings(self):
         """
         Sets in the self.options dictionary the default settings for this
@@ -75,11 +66,8 @@ class ServerModule:
 
 
 
-class ListenerServerModule(ServerModule):
-    """ The interface for a ServerModule which listens for notifications"""
-
-    def __init__(self, configs, shell):
-        ServerModule.__init__(self, configs, shell)
+class ListenerServerModule:
+    """ The interface for a ServerModule which listens for notifications """
 
 
     def listen(self):
@@ -90,5 +78,39 @@ class ListenerServerModule(ServerModule):
         twisted reactor for all ports he wants to listen to.
         Should be implemented.
         """
-        pass
+        raise ServerModule.NotImplemented('listen')
 
+
+    def get_protocol_name(self):
+        """
+        Return the name of the protocol used for this Listening Module.
+        See umit.inventory.server.Notification.
+        Must be implemented.
+        """
+        raise ServerModule.NotImplemented('get_protocol_name')
+
+
+
+class SubscriberServerModule:
+    """
+    The interface for a ServerModule which subscribes for receiving
+    notifications as they arrive to the ListenerServerModule's.
+    """
+
+    def receive_notification(self, notification):
+        """
+        Called when the module received a notification.
+
+        Must be implemented.
+        """
+        raise ServerModule.NotImplemented('receive_notification')
+
+
+    def subscribe(self):
+        """
+        Called when the module must subscribe to the listener modules from
+        which he wants to receive notifications.
+
+        Must be implemented.
+        """
+        raise ServerModule.NotImplemented('subscribe')

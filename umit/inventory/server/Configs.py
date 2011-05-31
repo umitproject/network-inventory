@@ -52,6 +52,10 @@ class ServerConfig(InventoryConfig):
                 os.path.join('umit', 'inventory', 'server', 'modules'))
         self.set('SNMPListener', InventoryConfig.module_enabled, False)
 
+        self.add_section('MongoDatabase')
+        self.set('MongoDatabase', InventoryConfig.module_path,\
+                os.path.join('umit', 'inventory', 'server', 'modules'))
+        self.set('MongoDatabase', InventoryConfig.module_enabled, True)
 
     def _set_default_config_file(self):
         """Sets the default configuration file"""
