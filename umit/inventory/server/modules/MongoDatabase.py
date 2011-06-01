@@ -96,7 +96,7 @@ class MongoDatabase(ServerModule, SubscriberServerModule):
         self.options[MongoDatabase.host] = 'localhost'
         self.options[MongoDatabase.port] = ''
         self.options[MongoDatabase.database_name] = 'umit_inventory'
-        self.options[MongoDatabase.notifications_collection] = 'notitifications'
+        self.options[MongoDatabase.notifications_collection] = 'notifications'
         self.options[MongoDatabase.username] = ''
         self.options[MongoDatabase.password] = ''
 

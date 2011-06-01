@@ -68,34 +68,34 @@ class AgentListener(ListenerServerModule, ServerModule):
             # TODO: Log this
 
         # Must be careful, as it may be invalid and not contain all the fields.
-        standard_fields = dict()
-        custom_fields = dict()
+        fields = dict()
         try:
-            standard_fields[NotificationFields.source_host] =\
+            fields[NotificationFields.source_host] =\
                     temp[AgentNotificationFields.source_host]
 
-            standard_fields[NotificationFields.timestamp] =\
+            fields[NotificationFields.timestamp] =\
                     temp[AgentNotificationFields.timestamp]
 
-            standard_fields[NotificationFields.protocol] =\
+            fields[NotificationFields.protocol] =\
                     self.get_protocol_name()
 
-            standard_fields[NotificationFields.type] =\
+            fields[NotificationFields.type] =\
                     temp[AgentNotificationFields.message_type]
 
-            standard_fields[NotificationFields.description] =\
+            fields[NotificationFields.description] =\
                     temp[AgentNotificationFields.message]
 
-            custom_fields[AgentNotificationFields.monitoring_module] =\
+            fields[AgentNotificationFields.monitoring_module] =\
                     temp[AgentNotificationFields.monitoring_module]
-            custom_fields[AgentNotificationFields.module_fields] =\
+
+            fields[AgentNotificationFields.module_fields] =\
                     temp[AgentNotificationFields.module_fields]
         except Exception, e:
             traceback.prin_exc()
             # TODO: Log this
 
         try:
-            notification = Notification(standard_fields, custom_fields)
+            notification = AgentNotification(fields)
             self.shell.parse_notification(self.get_name(), notification)
         except Exception, e:
             traceback.print_exc()
@@ -117,3 +117,18 @@ class AgentDatagramProtocol(DatagramProtocol):
 
     def datagramReceived(self, data, (host, port)):
         self.agent_listener.receive_message(host, port, data)
+
+
+
+class AgentNotification(Notification):
+    """ The notification class associated to this protocol """
+
+    def __init__(self, fields):
+        Notification.__init__(self, fields)
+
+        monitoring_module_field = AgentNotificationFields.monitoring_module
+        try:
+            self.fields[monitoring_module_field] =\
+                    fields[monitoring_module_field]
+        except:
+            raise MissingNotificationFields(monitoring_module_field)
