@@ -304,10 +304,10 @@ class CorruptInventoryModule(Exception):
     def __init__(self, module_name, module_path, err_type=0):
         self.err_message = 'Module ' + str(module_name) + ':'
         if err_type == CorruptInventoryModule.corrupt_path:
-            self.err_description = module_path + '/' + module_name + '.py' +\
+            self.err_description = module_path + '/' + module_name + '.py ' +\
                     ' not found, missing permissions or invalid syntax'
         elif err_type == CorruptInventoryModule.corrupt_file:
-            self.err_description = module_path + '/' + module_name + '.py' +\
+            self.err_description = module_path + '/' + module_name + '.py ' +\
                     'doesn\'t contain a class called ' + module_name
         else:
             self.err_description = 'Undefined error'
