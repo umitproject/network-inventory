@@ -74,9 +74,11 @@ class SNMPListener(ListenerServerModule, ServerModule):
             raise UnsupportedSNMPVersion(snmp_version)
 
         message, temp = decoder.decode(data, asn1Spec=prot_module.Message())
+        print message
 
         # If configured, check if the community string matches
         recv_community = prot_module.apiMessage.getCommunity(message)
+        print recv_community
         if self.check_community_string and\
             recv_community != self.community_string:
             raise InvalidCommunityString(host, port, recv_community)
@@ -90,8 +92,8 @@ class SNMPListener(ListenerServerModule, ServerModule):
         # Only supporting SNMPv1 and SNMPv2 at the moment
         if snmp_version == api.protoVersion1:
             self.parse_snmpv1_pdu(prot_module, recv_pdu)
-        elif snmp_version == api.protoVersion2:
-            self.parse_snmpv2_pdu(prot_module, recv_pdu)
+        elif snmp_version == api.protoVersion2c:
+            self.parse_snmpv2_pdu(prot_module, recv_pdu, host)
         else:
             raise UnsupportedSNMPVersion(snmp_version)
 
@@ -124,9 +126,55 @@ class SNMPListener(ListenerServerModule, ServerModule):
         # TODO parse to Notification object
 
 
-    def parse_snmpv2_pdu(self, prot_module, trap_pdu):
+    def parse_snmpv2_pdu(self, prot_module, trap_pdu, host):
         """ Parses and saves a SNMPv2 Trap PDU """
-        pass
+        key = 0
+        value = 1
+
+        trap_api = prot_module.apiTrapPDU
+        var_binds = trap_api.getVarBinds(trap_pdu)
+        optional_parameters = dict()
+
+        uptime = None
+        source_host = None
+        trap_oid = None
+        trap_enterprise = None
+
+        for var_bind in var_binds:
+            print '%s = %s' % (var_bind[0], var_bind[1])
+
+            # Check for SNMPv2 General fields
+
+            #TODO check why the community is also here. ignoring for now.
+            if var_bind[key] == trap_api.snmpTrapCommunity:
+                continue
+
+            if var_bind[key] == trap_api.sysUpTime:
+                uptime = var_bind[value]
+                continue
+
+            if var_bind[key] == trap_api.snmpTrapAddress:
+                source_host = var_bind[value].prettyPrint()
+                continue
+
+            if var_bind[key] == trap_api.snmpTrapOID:
+                trap_oid = var_bind[value].prettyPrint()
+                continue
+
+            if var_bind[key] == trap_api.snmpTrapEnterprise:
+                trap_enterprise = var_bind[value].prettyPrint()
+                continue
+
+            # Optional parameter. Saving in specific dictionary
+            optional_parameters[var_bind[key].prettyPrint()] =\
+                    var_bind[value].prettyPrint()
+
+        # If the host which emited it isn't remote, then the source address
+        # is the one mentioned in the IP packet.
+        if source_host == None:
+            source_host = host
+
+        # TODO parse to Notification object
 
 
     def listen(self):
