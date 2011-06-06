@@ -89,19 +89,42 @@ class SNMPListener(ListenerServerModule, ServerModule):
 
         # Only supporting SNMPv1 and SNMPv2 at the moment
         if snmp_version == api.protoVersion1:
-            self.parse_snmpv1_pdu(recv_pdu)
+            self.parse_snmpv1_pdu(prot_module, recv_pdu)
         elif snmp_version == api.protoVersion2:
-            self.parse_snmpv2_pdu(recv_pdu)
+            self.parse_snmpv2_pdu(prot_module, recv_pdu)
         else:
             raise UnsupportedSNMPVersion(snmp_version)
 
 
-    def parse_snmpv1_pdu(self, trap_pdu):
+    def parse_snmpv1_pdu(self, prot_module, trap_pdu):
         """ Parses and saves a SNMPv1 Trap PDU """
-        pass
+
+        # Get the general fields
+        enterprise_oid = prot_module.apiTrapPDU.getEnterprise(trap_pdu)
+        enterprise_oid = enterprise_oid.prettyPrint()
+        generic_trap_id = prot_module.apiTrapPDU.getGenericTrap(trap_pdu)
+        enterprise_trap_id = prot_module.apiTrapPDU.getSpecificTrap(trap_pdu)
+        agent_address = prot_module.apiTrapPDU.getAgentAddr(trap_pdu)
+        uptime = prot_module.apiTrapPDU.getTimeStamp(trap_pdu)
+
+        # Parsing the agent address into a string
+        agent_address_str = ''
+        for ch in agent_address:
+            agent_address_str += str(ord(ch)) + '.'
+        agent_address_str = agent_address_str.rstrip('.')
+
+        # Get the variables
+        variables_dict = dict()
+        variables = prot_module.apiTrapPDU.getVarBindList(trap_pdu)
+        for oid, value in variables:
+            oid_str = oid.prettyPrint()
+            value_str = value.prettyPrint()
+            variables[oid_str] = value_str
+
+        # TODO parse to Notification object
 
 
-    def parse_snmpv2_pdu(self, trap_pdu):
+    def parse_snmpv2_pdu(self, prot_module, trap_pdu):
         """ Parses and saves a SNMPv2 Trap PDU """
         pass
 
