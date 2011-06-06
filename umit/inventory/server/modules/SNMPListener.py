@@ -39,6 +39,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
     # Options
     port_option = 'listening_port'
     community_string = 'community_string'
+    check_community_string = 'check_comunity_string'
 
 
     def __init__(self, configs, shell):
@@ -46,6 +47,8 @@ class SNMPListener(ListenerServerModule, ServerModule):
 
         self.port = int(self.options[SNMPListener.port_option])
         self.community_string = self.options[SNMPListener.community_string]
+        self.check_community_string =\
+                self.options[SNMPListener.check_community_string]
 
 
     def get_name(self):
@@ -59,20 +62,48 @@ class SNMPListener(ListenerServerModule, ServerModule):
     def init_default_settings(self):
         self.options[SNMPListener.port_option] = '162'
         self.options[SNMPListener.community_string] = 'public'
+        self.options[SNMPListener.check_community_string] = 'True'
 
 
     def receive_message(self, host, port, data):
         """ Called when we received a SNMP message on the configured port. """
-        while data:
-            snmp_version = int(api.decodeMessageVersion(data))
-            if snmp_version in api.protoModules:
-                protocol_module = api.protoModules[snmp_version]
-            else:
-                raise UnsupportedSNMPVersion(snmp_version)
+        snmp_version = int(api.decodeMessageVersion(data))
+        if snmp_version in api.protoModules:
+            prot_module = api.protoModules[snmp_version]
+        else:
+            raise UnsupportedSNMPVersion(snmp_version)
 
-            print snmp_version
-            return
+        message, temp = decoder.decode(data, asn1Spec=prot_module.Message())
 
+        # If configured, check if the community string matches
+        recv_community = prot_module.apiMessage.getCommunity(message)
+        if self.check_community_string and\
+            recv_community != self.community_string:
+            raise InvalidCommunityString(host, port, recv_community)
+
+        recv_pdu = prot_module.apiMessage.getPDU(message)
+
+        # Only accepting SNMP Trap PDU's
+        if not recv_pdu.isSameTypeWith(prot_module.TrapPDU()):
+            raise InvalidSNMPType(host, port)
+
+        # Only supporting SNMPv1 and SNMPv2 at the moment
+        if snmp_version == api.protoVersion1:
+            self.parse_snmpv1_pdu(recv_pdu)
+        elif snmp_version == api.protoVersion2:
+            self.parse_snmpv2_pdu(recv_pdu)
+        else:
+            raise UnsupportedSNMPVersion(snmp_version)
+
+
+    def parse_snmpv1_pdu(self, trap_pdu):
+        """ Parses and saves a SNMPv1 Trap PDU """
+        pass
+
+
+    def parse_snmpv2_pdu(self, trap_pdu):
+        """ Parses and saves a SNMPv2 Trap PDU """
+        pass
 
 
     def listen(self):
@@ -114,3 +145,20 @@ class UnsupportedSNMPVersion(Exception):
     def __str__(self):
         return repr(self.err_msg)
 
+class InvalidCommunityString(Exception):
+
+    def __init__(self, host, port, comm_string):
+        self.err_msg = 'Received %s community string from %s:%s' %\
+                (str(comm_string), str(host), str(port))
+
+    def __str__(self):
+        return repr(self.err_msg)
+
+class InvalidSNMPType(Exception):
+
+    def __init__(self, host, port):
+        self.err_msg = 'Only supporting TRAP PDU\'s. Source host: %s:%s' %\
+                (str(host), str(port))
+
+    def __str__(self):
+        return repr(self.err_msg)
