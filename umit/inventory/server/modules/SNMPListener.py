@@ -228,7 +228,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
         if source_host == None:
             source_host = host
 
-
+        # TODO delete this
         print '----------------------------'
         print 'source_host: %s' % source_host
         print 'uptime: %s' % uptime
@@ -238,8 +238,39 @@ class SNMPListener(ListenerServerModule, ServerModule):
         for key in optional_parameters.keys():
             print '\t%s = %s (%s)' % (key, optional_parameters[key],\
                     type(optional_parameters[key]))
+        # TODO until here
 
-        # TODO parse to Notification object
+        # Parse to a Notification object
+        fields = dict()
+        try:
+            # SNMPv2c specific fields
+            fields[SNMPv2cNotificationFields.uptime] = uptime
+            fields[SNMPv2cNotificationFields.trap_oid] = str(trap_oid)
+            fields[SNMPv2cNotificationFields.enterprise_oid] =\
+                    str(trap_enterprise)
+
+            # General notification fields
+            fields[NotificationFields.source_host] = str(source_host)
+            fields[NotificationFields.timestamp] = float(time.time())
+            fields[NotificationFields.protocol] = str(self.get_protocol_name())
+            fields[NotificationFields.description] =\
+                    unicode(SNMPUtils.parse_description(optional_parameters))
+            fields[NotificationFields.notification_type] =\
+                    str(NotificationTypes.unknown)
+
+            # Add the variables to the fields.
+            # TODO: May need some methods to ensure entity inheritance
+            for variable_key in optional_parameters.keys():
+                # TODO: better way for this
+                fields_key = variable_key.replace('.', '_')
+                fields[fields_key] = optional_parameters[variable_key]
+
+            # Forward to the Shell
+            notification = SNMPv2cNotification(fields)
+            self.shell.parse_notification(self.get_name(), notification)
+        except Exception, e:
+            # TODO log this
+            traceback.print_exc()
 
 
     def listen(self):
@@ -405,6 +436,43 @@ class SNMPv1NotificationFields(NotificationFields):
 
 class SNMPv2cNotification(Notification):
     """ The notification class for SNMPv2c """
+
+    @staticmethod
+    def get_name():
+        return 'SNMPv2cNotification'
+
+    @staticmethod
+    def get_fields_class():
+        return SNMPv2cNotificationFields
+
+
+class SNMPv2cNotificationFields(NotificationFields):
+    """ The fields associated with the SNMPv2cNotification class """
+
+    names = copy(NotificationFields.names)
+    types = copy(NotificationFields.types)
+
+    # Set the names
+    uptime = 'uptime'
+    trap_oid = 'trap_oid'
+    enterprise_oid = 'enterprise_oid'
+    names.append(uptime)
+    names.append(trap_oid)
+    names.append(enterprise_oid)
+
+    # Set the types
+    types[uptime] = int
+    types[trap_oid] = str
+    types[enterprise_oid] = str
+
+    @staticmethod
+    def get_names():
+        return SNMPv2cNotificationFields.names
+
+    @staticmethod
+    def get_types():
+        return SNMPv2cNotificationFields.types
+
 
 
 class UnsupportedSNMPVersion(Exception):
