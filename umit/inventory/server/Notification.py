@@ -19,6 +19,7 @@
 import json
 from copy import copy
 
+
 class Notification:
     """
     Unified notification format that will be saved in the database. Every
@@ -34,86 +35,127 @@ class Notification:
       to the one obtained by time().
     * protocol: The name of the protocol used by the listener. E.g. SNMP,
       UmitAgent, etc.
-    * type: The type of the notification. See
+    * notification_type: The type of the notification. See
       umit.inventory.common.NotificationTypes.
     * description: A short description of the notification.
-      that is JSON seriazable.
+
+    For the types of these fields, see NotificationFields. The values of these
+    fields can be found in the object property fields which is a dictionary
+    having as keys the names defined in NotificationFields.
     """
 
     def __init__(self, fields):
         """
         Initializes a notification message.
         fields: A dictionary with all the fields in this entry. It can contain
-        any fields, but must contain the Notification class specific ones.
+        any fields, but must contain the Notification class specific ones and
+        also have the correct type (see NotificationFields class).
         """
 
-        # Ensure the fields are json seriazable
-        json.dumps(fields)
-
-        # Perform the fields sanity check
-        try:
-            self.source_host = fields[NotificationFields.source_host]
-        except:
-            raise MissingNotificationFields(NotificationFields.source_host)
-
-        try:
-            self.timestamp = fields[NotificationFields.timestamp]
-        except:
-            raise MissingNotificationFields(NotificationFields.timestamp)
-
-        try:
-            self.protocol = fields[NotificationFields.protocol]
-        except:
-            raise MissingNotificationFields(NotificationFields.protocol)
-
-        try:
-            self.type = fields[NotificationFields.type]
-        except:
-            raise MissingNotificationFields(NotificationFields.type)
-
-        try:
-            self.description = fields[NotificationFields.description]
-        except:
-            raise MissingNotificationFields(NotificationFields.description)
-
-        # Save the fields dictionary to ensure additional fields are not lost.
+        # Save the fields and check they are correct
         self.fields = fields
+        self.sanity_check()
 
 
-    def encode(self):
-        """
-        Encodes the current Notification to an object that can be stored in the
-        database. Returns that object. Should be used only by the database
-        before storing the notification.
-        """
-        return self.fields
+    def sanity_check(self):
+        """ Ensure the correct names and types in the fields """
+        fields_class = self.get_fields_class()
+
+        names = fields_class.get_names()
+        types = fields_class.get_types()
+
+        for name in names:
+            # Check the name exists in the fields
+            if name not in self.fields.keys():
+                raise MissingNotificationField(name, self.get_name())
+
+            # Check it has the correct type
+            if type(self.fields[name]) != types[name]:
+                raise IncorrectNotificationFieldType(name,\
+                        type(self.fields[name]), types[name], self.get_name())
 
 
-    @staticmethod
-    def decode(db_obj):
+    def get_name(self):
         """
-        Used by the database to decode the DB object into this class format.
-        Basically, message == Notification.decode(message.encode()).
+        Returns the name of the class.
+        Must be implemented when inheriting.
         """
-        # Sanity check will be performed in the Notification constructor
-        return Notification(db_obj)
+        return 'BaseNotification'
+
+
+    def get_fields_class(self):
+        """
+        Returns a class which inherents or is NotificationFields.
+        See the documentation of the NotificationFields class for details.
+        """
+        return NotificationFields
 
 
 
 class NotificationFields:
+    """
+    Class defining the fields of a Notification and their types.
 
+    For every class that inherents the base Notification class you must
+    define a class that inherents the NotificationFields class which
+    implements a get_names() and get_types() methods.
+
+    The get_names()/get_types() methods must return a names list/types dict
+    which adds the new Notification fields, but it's mandatory it copies
+    the names/types from this class (or it's nearest ancestor).
+    """
+
+    # If adding a field, you must:
+    # 1. Assign it's string value to a variable for easier referencing.
+    # 2. Add the variable to the names list.
+    # 3. Associate it's type in the types dictionary.
+
+    # The notification fields names.
     source_host = 'source_host'
     timestamp = 'timestamp'
     protocol = 'protocol'
-    type = 'type'
+    notification_type = 'type'
     description = 'description'
+    names = [source_host, timestamp, protocol,notification_type, description]
+
+    # The notification fields types.
+    types = dict()
+    types[source_host] = str
+    types[timestamp] = float
+    types[protocol] = str
+    types[notification_type] = str
+    types[description] = unicode
+
+
+    @staticmethod
+    def get_names():
+        return NotificationFields.names
+
+
+    @staticmethod
+    def get_types():
+        return NotificationFields.types
 
 
 
-class MissingNotificationFields(Exception):
+class MissingNotificationField(Exception):
 
-    def __init__(self, field_name):
-        self.err_msg = 'Field + ' + str(field_name) + ' is mandatory'
+    def __init__(self, field_name, notification_class_name):
+        self.err_msg = 'Field %s is mandatory for notification class %s' %\
+                (field_name, notification_class_name)
 
     def __str__(self):
         return repr(self.err_msg)
+
+
+class IncorrectNotificationFieldType(Exception):
+
+    def __init__(self, field_name, field_crt_type, field_correct_type,\
+            notification_class_name):
+        self.err_msg = 'Field %s got type %s for class %s. Expected %s.' %\
+                (field_name, str(field_crt_type), notification_class_name,\
+                 str(field_correct_type))
+
+    def __str__(self):
+        return repr(self.err_msg)
+

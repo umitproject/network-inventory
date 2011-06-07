@@ -23,7 +23,7 @@ from umit.inventory.server.Module import ServerModule
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 import umit.inventory.server.Notification
-from umit.inventory.common import AgentNotificationFields
+from umit.inventory.common import AgentFields
 
 from twisted.internet import reactor
 from twisted.internet.protocol import ServerFactory
@@ -31,6 +31,7 @@ from twisted.internet.protocol import DatagramProtocol
 
 import traceback
 import json
+from copy import copy
 
 
 class AgentListener(ListenerServerModule, ServerModule):
@@ -71,25 +72,27 @@ class AgentListener(ListenerServerModule, ServerModule):
         fields = dict()
         try:
             fields[NotificationFields.source_host] =\
-                    temp[AgentNotificationFields.source_host]
+                    str(temp[AgentFields.source_host])
 
             fields[NotificationFields.timestamp] =\
-                    temp[AgentNotificationFields.timestamp]
+                    float(temp[AgentFields.timestamp])
 
-            fields[NotificationFields.protocol] =\
-                    self.get_protocol_name()
+            fields[NotificationFields.protocol] = str(self.get_protocol_name())
 
-            fields[NotificationFields.type] =\
-                    temp[AgentNotificationFields.message_type]
+            fields[NotificationFields.notification_type] =\
+                    str(temp[AgentFields.message_type])
 
             fields[NotificationFields.description] =\
-                    temp[AgentNotificationFields.message]
+                    unicode(temp[AgentFields.message])
 
             fields[AgentNotificationFields.monitoring_module] =\
-                    temp[AgentNotificationFields.monitoring_module]
+                    unicode(temp[AgentFields.monitoring_module])
 
-            fields[AgentNotificationFields.module_fields] =\
-                    temp[AgentNotificationFields.module_fields]
+            # TODO decide how to do add the dynamic fields to the
+            # AgentNotificationFields definitions.
+            for module_field in temp[AgentFields.module_fields].keys():
+                fields[module_field] =\
+                        temp[AgentFields.module_fields][module_field]
         except Exception, e:
             traceback.prin_exc()
             # TODO: Log this
@@ -123,12 +126,29 @@ class AgentDatagramProtocol(DatagramProtocol):
 class AgentNotification(Notification):
     """ The notification class associated to this protocol """
 
-    def __init__(self, fields):
-        Notification.__init__(self, fields)
+    def get_name(self):
+        return 'UmitAgentNotification'
 
-        monitoring_module_field = AgentNotificationFields.monitoring_module
-        try:
-            self.fields[monitoring_module_field] =\
-                    fields[monitoring_module_field]
-        except:
-            raise MissingNotificationFields(monitoring_module_field)
+    def get_fields_class(self):
+        return AgentNotificationFields
+
+
+
+class AgentNotificationFields(Notification):
+    """ The fields associated with the AgentNotification class. """
+
+    names = copy(NotificationFields.names)
+    types = copy(NotificationFields.types)
+
+    monitoring_module = AgentFields.monitoring_module
+    names.append(monitoring_module)
+
+    types[AgentFields.monitoring_module] = unicode
+
+    @staticmethod
+    def get_names():
+        return AgentNotificationFields.names
+
+    @staticmethod
+    def get_types():
+        return AgentNotificationFields.types

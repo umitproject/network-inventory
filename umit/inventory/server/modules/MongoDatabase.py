@@ -81,6 +81,8 @@ class MongoDatabase(ServerModule, SubscriberServerModule):
 
         self.notifications_collection =\
                 self.database[self.notifications_collection_name]
+        print '---- %s %s' % (self.notifications_collection,\
+                type(self.notifications_collection))
 
 
     def get_name(self):
@@ -103,15 +105,20 @@ class MongoDatabase(ServerModule, SubscriberServerModule):
 
     def receive_notification(self, notification):
         """ Called when a notification was received """
-        #TODO: Store the notification
+
+        # Make sure we succcesfully connected to the db
+        if self.database == None:
+            return
+
+        print '--------- STORING -----------'
+        print notification.fields
         print '-----------------------------'
-        print notification.encode()
 
         if not isinstance(notification, Notification):
             # TODO maybe log this
             return
 
-        self.notifications_collection.insert(notification.encode())
+        self.notifications_collection.insert(notification.fields)
 
 
     def _connect(self):

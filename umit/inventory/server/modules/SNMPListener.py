@@ -31,8 +31,6 @@ from twisted.internet.protocol import DatagramProtocol
 from pysnmp.proto import api
 from pyasn1.codec.ber import decoder
 import pyasn1.type.univ
-import pyasn1.type.char
-import pyasn1.type.useful
 
 import traceback
 
@@ -158,7 +156,12 @@ class SNMPListener(ListenerServerModule, ServerModule):
             key = var_bind[0].prettyPrint()
             # var_bind[1] is the value associated with var_bind[0]. Converting
             # to a Python raw type.
-            value = ASN1Type.convert_to_python_type(var_bind[1])
+            try:
+                value = ASN1Type.convert_to_python_type(var_bind[1])
+            except Exception, e:
+                # TODO log this
+                traceback.print_exc()
+                continue
 
             # Check for SNMPv2 General fields
 
@@ -294,6 +297,7 @@ class UnsupportedSNMPVersion(Exception):
     def __str__(self):
         return repr(self.err_msg)
 
+
 class InvalidCommunityString(Exception):
 
     def __init__(self, host, port, comm_string):
@@ -302,6 +306,7 @@ class InvalidCommunityString(Exception):
 
     def __str__(self):
         return repr(self.err_msg)
+
 
 class InvalidSNMPType(Exception):
 

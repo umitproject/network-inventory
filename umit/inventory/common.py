@@ -34,14 +34,14 @@ class NotificationTypes:
 
 
 
-class AgentNotificationFields:
+class AgentFields:
 
-    source_host = 'SourceHost'
-    timestamp = 'Timestamp'
-    message = 'Message'
-    message_type = 'Type'
-    monitoring_module = 'MonitoringModule'
-    module_fields = 'ModuleFields'
+    source_host = 'source_host'
+    timestamp = 'timestamp'
+    message = 'message'
+    message_type = 'type'
+    monitoring_module = 'monitoring_module'
+    module_fields = 'module_fields'
 
 
 
@@ -52,15 +52,15 @@ class AgentNotificationParser:
     def parse(message, msg_type, fields, module):
         """Parses the message into the internal format (JSON)"""
         message_obj = dict()
-        message_obj[AgentNotificationFields.message] = message
-        message_obj[AgentNotificationFields.message_type] = msg_type
-        message_obj[AgentNotificationFields.timestamp] = time.time()
-        message_obj[AgentNotificationFields.monitoring_module] = module
+        message_obj[AgentFields.message] = message
+        message_obj[AgentFields.message_type] = msg_type
+        message_obj[AgentFields.timestamp] = time.time()
+        message_obj[AgentFields.monitoring_module] = module
         # TODO : get the IP address of the Host
-        message_obj[AgentNotificationFields.source_host] = socket.gethostname()
-        message_obj[AgentNotificationFields.module_fields] = dict()
+        message_obj[AgentFields.source_host] = socket.gethostname()
+        message_obj[AgentFields.module_fields] = dict()
         for i in fields.keys():
-            message_obj[AgentNotificationFields.module_fields][i] = fields[i]
+            message_obj[AgentFields.module_fields][i] = fields[i]
 
         return json.dumps(message_obj)
 
