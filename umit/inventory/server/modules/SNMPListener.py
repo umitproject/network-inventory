@@ -22,6 +22,7 @@ from umit.inventory.server.Module import ListenerServerModule
 from umit.inventory.server.Module import ServerModule
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
+from umit.inventory.common import NotificationTypes
 import umit.inventory.server.Notification
 
 from twisted.internet import reactor
@@ -33,6 +34,8 @@ from pyasn1.codec.ber import decoder
 import pyasn1.type.univ
 
 import traceback
+from copy import copy
+import time
 
 
 class SNMPListener(ListenerServerModule, ServerModule):
@@ -75,11 +78,11 @@ class SNMPListener(ListenerServerModule, ServerModule):
             raise UnsupportedSNMPVersion(snmp_version)
 
         message, temp = decoder.decode(data, asn1Spec=prot_module.Message())
-        print message
+        # print message
 
         # If configured, check if the community string matches
         recv_community = prot_module.apiMessage.getCommunity(message)
-        print recv_community
+        # print recv_community
         if self.check_community_string and\
             recv_community != self.community_string:
             raise InvalidCommunityString(host, port, recv_community)
@@ -116,7 +119,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
         # Get the variables
         variables_dict = dict()
         variables = prot_module.apiTrapPDU.getVarBinds(trap_pdu)
-        print variables
+        #print variables
 
         for oid, value in variables:
             oid_str = oid.prettyPrint()
@@ -127,12 +130,44 @@ class SNMPListener(ListenerServerModule, ServerModule):
                 traceback.print_exc()
                 continue
 
-            print '%s = %s (%s)' % (oid_str, converted_value,\
-                    type(converted_value))
+            #print '%s = %s (%s)' % (oid_str, converted_value,\
+            #        type(converted_value))
             variables_dict[oid_str] = converted_value
 
-        print variables_dict
-        # TODO parse to Notification object
+        # Parse to Notification object
+        fields = dict()
+        try:
+            # SNMPv1 specific fields
+            fields[SNMPv1NotificationFields.generic_trap_id] =\
+                    int(generic_trap_id)
+            fields[SNMPv1NotificationFields.enterprise_trap_id] =\
+                    int(enterprise_trap_id)
+            fields[SNMPv1NotificationFields.enterprise_oid] =\
+                    str(enterprise_oid)
+            fields[SNMPv1NotificationFields.uptime] = int(uptime)
+
+            # Notification general fields
+            fields[NotificationFields.source_host] = str(agent_address)
+            fields[NotificationFields.timestamp] = float(time.time())
+            fields[NotificationFields.protocol] = str(self.get_protocol_name())
+            fields[NotificationFields.description] =\
+                    unicode(SNMPUtils.parse_description(variables_dict))
+            fields[NotificationFields.notification_type] =\
+                    str(SNMPUtils.parse_type(generic_trap_id))
+
+            # Add the variables to the fields.
+            # TODO: May need some methods to ensure entity inheritance
+            for variable_key in variables_dict.keys():
+                # Replacing dots with '_'. TODO: better way for this
+                fields_key = variable_key.replace('.', '_')
+                fields[fields_key] = variables_dict[variable_key]
+
+            # Forward to the Shell
+            notification = SNMPv1Notification(fields)
+            self.shell.parse_notification(self.get_name(), notification)
+        except Exception, e:
+            # TODO log this
+            traceback.print_exc()
 
 
     def parse_snmpv2_pdu(self, prot_module, trap_pdu, host):
@@ -145,10 +180,10 @@ class SNMPListener(ListenerServerModule, ServerModule):
         optional_parameters = dict()
 
         # Known variables.
-        uptime = None
+        uptime = -1
         source_host = None
-        trap_oid = None
-        trap_enterprise = None
+        trap_oid = ''
+        trap_enterprise = ''
 
         for var_bind in var_binds:
             # The key is the ObjectIdentifier which we will use as a string.
@@ -192,6 +227,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
         # is the one mentioned in the IP packet.
         if source_host == None:
             source_host = host
+
 
         print '----------------------------'
         print 'source_host: %s' % source_host
@@ -263,6 +299,50 @@ class ASN1Type:
 
 
 
+class SNMPUtils:
+
+    @staticmethod
+    def parse_description(variables_dict):
+        description_str = 'Variable bindings:\n'
+        for var_key in variables_dict:
+            description_line = '\t %s = %s\n' % (str(var_key),\
+                    str(variables_dict[var_key]))
+            description_str += description_line
+
+        return description_str.rstrip('\n')
+
+
+    @staticmethod
+    def parse_type(generic_trap_id):
+        # Cold Start
+        if generic_trap_id == 0:
+            return NotificationTypes.info
+
+        # Warm Start
+        if generic_trap_id == 1:
+            return NotificationTypes.recovery
+
+        # Link Down
+        if generic_trap_id == 2:
+            return NotificationTypes.critical
+
+        # Link Up
+        if generic_trap_id == 3:
+            return NotificationTypes.recovery
+
+        # Authentication Failure
+        if generic_trap_id == 4:
+            return NotificationTypes.security_alert
+
+        # EGP Neighbour Loss
+        if generic_trap_id == 5:
+            return NotificationTypes.warning
+
+        # Enterprise specific
+        return NotificationTypes.unknown
+
+
+
 class SNMPDatagramProtocol(DatagramProtocol):
     """ The protocol used when receiving messages from SNMP agents. """
 
@@ -279,13 +359,52 @@ class SNMPDatagramProtocol(DatagramProtocol):
 
 
 
-class SNMPNotification(Notification):
-    """ The notification class for SNMP """
+class SNMPv1Notification(Notification):
+    """ The notification class for SNMPv1 """
 
-    def __init__(self, fields):
-        Notification.__init__(self, fields)
-        #TODO add the SNMP specific fields to the class.
+    @staticmethod
+    def get_name():
+        return 'SNMPv1Notification'
 
+    @staticmethod
+    def get_fields_class():
+        return SNMPv1NotificationFields
+
+
+class SNMPv1NotificationFields(NotificationFields):
+    """ The fields associated with the SNMPv1Notification class """
+
+    names = copy(NotificationFields.names)
+    types = copy(NotificationFields.types)
+
+    # Set the names
+    generic_trap_id = 'generic_trap_id'
+    enterprise_trap_id = 'enterprise_trap_id'
+    uptime = 'uptime'
+    enterprise_oid = 'enterprise_oid'
+    names.append(generic_trap_id)
+    names.append(enterprise_trap_id)
+    names.append(uptime)
+    names.append(enterprise_oid)
+
+    # Set the types
+    types[generic_trap_id] = int
+    types[enterprise_trap_id] = int
+    types[uptime] = int
+    types[enterprise_oid] = str
+
+    @staticmethod
+    def get_names():
+        return SNMPv1NotificationFields.names
+
+    @staticmethod
+    def get_types():
+        return SNMPv1NotificationFields.types
+
+
+
+class SNMPv2cNotification(Notification):
+    """ The notification class for SNMPv2c """
 
 
 class UnsupportedSNMPVersion(Exception):

@@ -134,7 +134,7 @@ class AgentNotification(Notification):
 
 
 
-class AgentNotificationFields(Notification):
+class AgentNotificationFields(NotificationFields):
     """ The fields associated with the AgentNotification class. """
 
     names = copy(NotificationFields.names)

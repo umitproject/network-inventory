@@ -31,6 +31,8 @@ class NotificationTypes:
     recovery = "RECOVERY"
     critical = "CRITICAL"
     emergency = "EMERGENCY"
+    security_alert = "SECURITY ALERT"
+    unknown = 'UNKNOWN'
 
 
 
