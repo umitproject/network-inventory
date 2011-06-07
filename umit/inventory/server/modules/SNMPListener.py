@@ -30,6 +30,9 @@ from twisted.internet.protocol import DatagramProtocol
 
 from pysnmp.proto import api
 from pyasn1.codec.ber import decoder
+import pyasn1.type.univ
+import pyasn1.type.char
+import pyasn1.type.useful
 
 import traceback
 
@@ -110,75 +113,150 @@ class SNMPListener(ListenerServerModule, ServerModule):
         uptime = prot_module.apiTrapPDU.getTimeStamp(trap_pdu)
 
         # Parsing the agent address into a string
-        agent_address_str = ''
-        for ch in agent_address:
-            agent_address_str += str(ord(ch)) + '.'
-        agent_address_str = agent_address_str.rstrip('.')
+        agent_address_str = agent_address.prettyPrint()
 
         # Get the variables
         variables_dict = dict()
-        variables = prot_module.apiTrapPDU.getVarBindList(trap_pdu)
+        variables = prot_module.apiTrapPDU.getVarBinds(trap_pdu)
+        print variables
+
         for oid, value in variables:
             oid_str = oid.prettyPrint()
-            value_str = value.prettyPrint()
-            variables[oid_str] = value_str
+            try:
+                converted_value = ASN1Type.convert_to_python_type(value)
+            except Exception, e:
+                #TODO log this
+                traceback.print_exc()
+                continue
 
+            print '%s = %s (%s)' % (oid_str, converted_value,\
+                    type(converted_value))
+            variables_dict[oid_str] = converted_value
+
+        print variables_dict
         # TODO parse to Notification object
 
 
     def parse_snmpv2_pdu(self, prot_module, trap_pdu, host):
         """ Parses and saves a SNMPv2 Trap PDU """
-        key = 0
-        value = 1
 
         trap_api = prot_module.apiTrapPDU
         var_binds = trap_api.getVarBinds(trap_pdu)
+
+        # Here we will be saving the unknown variables.
         optional_parameters = dict()
 
+        # Known variables.
         uptime = None
         source_host = None
         trap_oid = None
         trap_enterprise = None
 
         for var_bind in var_binds:
-            print '%s = %s' % (var_bind[0], var_bind[1])
+            # The key is the ObjectIdentifier which we will use as a string.
+            key_raw = var_bind[0]
+            key = var_bind[0].prettyPrint()
+            # var_bind[1] is the value associated with var_bind[0]. Converting
+            # to a Python raw type.
+            value = ASN1Type.convert_to_python_type(var_bind[1])
 
             # Check for SNMPv2 General fields
 
             #TODO check why the community is also here. ignoring for now.
-            if var_bind[key] == trap_api.snmpTrapCommunity:
+            if key_raw == trap_api.snmpTrapCommunity:
                 continue
 
-            if var_bind[key] == trap_api.sysUpTime:
-                uptime = var_bind[value]
+            if key_raw == trap_api.sysUpTime:
+                uptime = value
                 continue
 
-            if var_bind[key] == trap_api.snmpTrapAddress:
-                source_host = var_bind[value].prettyPrint()
+            if key_raw == trap_api.snmpTrapAddress:
+                source_host = value
                 continue
 
-            if var_bind[key] == trap_api.snmpTrapOID:
-                trap_oid = var_bind[value].prettyPrint()
+            if key_raw == trap_api.snmpTrapOID:
+                trap_oid = value
                 continue
 
-            if var_bind[key] == trap_api.snmpTrapEnterprise:
-                trap_enterprise = var_bind[value].prettyPrint()
+            if key_raw == trap_api.snmpTrapEnterprise:
+                trap_enterprise = value
                 continue
 
             # Optional parameter. Saving in specific dictionary
-            optional_parameters[var_bind[key].prettyPrint()] =\
-                    var_bind[value].prettyPrint()
+            optional_parameters[key] = value
 
         # If the host which emited it isn't remote, then the source address
         # is the one mentioned in the IP packet.
         if source_host == None:
             source_host = host
 
+        print '----------------------------'
+        print 'source_host: %s' % source_host
+        print 'uptime: %s' % uptime
+        print 'trap_oid: %s' % trap_oid
+        print 'enterprise_oid: %s' % trap_enterprise
+        print 'Variables:'
+        for key in optional_parameters.keys():
+            print '\t%s = %s (%s)' % (key, optional_parameters[key],\
+                    type(optional_parameters[key]))
+
         # TODO parse to Notification object
 
 
     def listen(self):
         reactor.listenUDP(self.port, SNMPDatagramProtocol(self))
+
+
+
+class ASN1Type:
+    """ Simple ASN1 types used to determine the correct Python type """
+    integer = pyasn1.type.univ.Integer()
+    boolean = pyasn1.type.univ.Boolean()
+    bitstring = pyasn1.type.univ.BitString()
+    octetstring = pyasn1.type.univ.OctetString()
+    null = pyasn1.type.univ.Null()
+    oid = pyasn1.type.univ.ObjectIdentifier()
+    real = pyasn1.type.univ.Real()
+
+
+    @staticmethod
+    def convert_to_python_type(asn1_value):
+        """
+        Checks the given asn1 value and makes the appropiate cast
+        to a Python type.
+        """
+        # In PyASN1 the prettyPrint() method will return a string
+        # representation of that object.
+        # At the moment, the order of the if statements matters.
+
+        # Try to get an int if possible. Considering various types
+        # inheritance, this is the best way to go for indexing purposes.
+        try:
+            return int(asn1_value.prettyPrint())
+        except:
+            # Do nothing.
+            pass
+
+        if asn1_value.isSameTypeWith(ASN1Type.boolean):
+            return bool(asn1_value.prettyPrint())
+
+        if asn1_value.isSameTypeWith(ASN1Type.null):
+            # TODO: Decide what to return here: A string describing that the
+            # value is null or the python 'None-Type' None.
+            return '[Empty]'
+
+        if asn1_value.isSuperTypeOf(ASN1Type.integer):
+            return int(asn1_value.prettyPrint())
+
+        if asn1_value.isSameTypeWith(ASN1Type.bitstring) or\
+           asn1_value.isSuperTypeOf(ASN1Type.octetstring) or\
+           asn1_value.isSameTypeWith(ASN1Type.oid):
+            return asn1_value.prettyPrint()
+
+        if asn1_value.isSuperTypeOf(ASN1Type.real):
+            return float(asn1_value.prettyPrint())
+
+        return asn1_value.prettyPrint()
 
 
 
