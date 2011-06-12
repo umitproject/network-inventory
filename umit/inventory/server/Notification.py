@@ -35,6 +35,8 @@ class Notification:
       to the one obtained by time().
     * protocol: The name of the protocol used by the listener. E.g. SNMP,
       UmitAgent, etc.
+    * fields_class: The name of the class that defines the fields for the
+      notification. Should NOT be added manually.
     * notification_type: The type of the notification. See
       umit.inventory.common.NotificationTypes.
     * description: A short description of the notification.
@@ -55,6 +57,8 @@ class Notification:
         # Save the fields and check they are correct
         self.fields = fields
         self.sanity_check()
+
+        self.fields[NotificationFields.fields_class] = self.get_name()
 
 
     def sanity_check(self):
@@ -114,6 +118,7 @@ class NotificationFields:
     source_host = 'source_host'
     timestamp = 'timestamp'
     protocol = 'protocol'
+    fields_class = 'fields_class'
     notification_type = 'type'
     description = 'description'
     names = [source_host, timestamp, protocol,notification_type, description]
@@ -123,6 +128,7 @@ class NotificationFields:
     types[source_host] = str
     types[timestamp] = float
     types[protocol] = str
+    types[fields_class] = str
     types[notification_type] = str
     types[description] = unicode
 

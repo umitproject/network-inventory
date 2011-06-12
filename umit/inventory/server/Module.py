@@ -56,6 +56,16 @@ class ServerModule:
         pass
 
 
+    def init_database_operations(self):
+        """
+        Called by the Core when the Database is ready.
+        The module should use this method to fetch the needed data from the
+        database.
+        Should be implemented.
+        """
+        pass
+
+
     class NotImplemented(Exception):
 
         def __init__(self, name):

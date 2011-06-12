@@ -32,6 +32,10 @@ class ServerConfig(InventoryConfig):
     interface_port = 'interface_port'
 
 
+    def get_core_modules(self):
+        return ['Database']
+
+
     def _set_default_settings(self):
         """Load default fail-safe settings"""
 
@@ -52,10 +56,11 @@ class ServerConfig(InventoryConfig):
                 os.path.join('umit', 'inventory', 'server', 'modules'))
         self.set('SNMPListener', InventoryConfig.module_enabled, False)
 
-        self.add_section('MongoDatabase')
-        self.set('MongoDatabase', InventoryConfig.module_path,\
-                os.path.join('umit', 'inventory', 'server', 'modules'))
-        self.set('MongoDatabase', InventoryConfig.module_enabled, True)
+        self.add_section('Database')
+        self.set('Database', InventoryConfig.module_path,\
+                os.path.join('umit', 'inventory', 'server'))
+        self.set('Database', InventoryConfig.module_enabled, True)
+
 
     def _set_default_config_file(self):
         """Sets the default configuration file"""

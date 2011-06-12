@@ -22,6 +22,7 @@ import json
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.server.Module import ListenerServerModule
 from umit.inventory.server.Module import SubscriberServerModule
+from umit.inventory.server.Database import Database
 from umit.inventory.common import CorruptInventoryModule
 import umit.inventory.common
 from umit.inventory.server.Notification import Notification
@@ -33,7 +34,10 @@ class ServerCore:
 
     def __init__(self, configs):
         self.configs = configs
+        self.database = Database(configs)
         self.shell = ServerShell(self)
+        self.database.shell = self.shell
+
         self.modules = []
         self._load_modules()
 
@@ -60,6 +64,9 @@ class ServerCore:
                 if name != module_name:
                     raise CorruptServerModule(module_name, module_path,\
                             CorruptServerModule.get_name)
+
+                if name == 'Database':
+                    self.database = module_obj
 
             except Exception, e:
                 traceback.print_exc()
@@ -108,6 +115,7 @@ class ServerShell:
 
     def __init__(self, core):
         self._core = core
+        self.database = self._core.database
         self._subscriptions = dict()
 
 
@@ -142,7 +150,6 @@ class ServerShell:
                 if module_name not in self._subscriptions.keys():
                     self._subscriptions[module_name] = []
 
-                print subscriber.get_name() + ' --> ' + module_name
                 self._subscriptions[module_name].append(subscriber)
             return
 
@@ -163,6 +170,8 @@ class ServerShell:
         notification.
         notification: The actual notification.
         """
+        self.database.store_notification(notification)
+
         # No one subscribed to this listener.
         if listener_name not in self._subscriptions.keys():
             return

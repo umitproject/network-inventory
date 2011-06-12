@@ -91,6 +91,20 @@ class InventoryConfig(ConfigParser):
             self.load_settings()
 
 
+    def get_core_modules(self):
+        """
+        Returns a list with core modules. A core module can't be disabled.
+
+        Should be overwritten.
+        """
+        return []
+
+
+    def is_core_module(self, module_name):
+        """ Returns True if module_name is a Core module """
+        return module_name in self.get_core_modules()
+
+
     # File handling methods
 
     def load_default_settings(self):
@@ -158,6 +172,9 @@ class InventoryConfig(ConfigParser):
         False otherwise.
         Raises InventoryConfig.ModuleNotInstalled if module_name is not installed.
         """
+        if self.is_core_module(module_name):
+            return True
+
         if not self.module_is_installed(module_name):
             raise InventoryConfig.ModuleNotInstalled(module_name)
 
@@ -170,6 +187,9 @@ class InventoryConfig(ConfigParser):
         is True.
         Raises InventoryConfig.ModuleNotInstalled if module_name is not installed
         """
+        if self.is_core_module(module_name):
+            return
+
         if not self.module_is_installed(module_name):
             raise InventoryConfig.ModuleNotInstalled(module_name)
 
