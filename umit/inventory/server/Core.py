@@ -108,7 +108,7 @@ class ServerShell:
 
     def __init__(self, core):
         self._core = core
-        self.subscriptions = dict()
+        self._subscriptions = dict()
 
 
     def get_modules_list(self):
@@ -139,17 +139,17 @@ class ServerShell:
                 # If no one subscribed to this listener module until now, then
                 # add it to the dictionary.
                 module_name = module.get_name()
-                if module_name not in self.subscriptions.keys():
-                    self.subscriptions[module_name] = []
+                if module_name not in self._subscriptions.keys():
+                    self._subscriptions[module_name] = []
 
                 print subscriber.get_name() + ' --> ' + module_name
-                self.subscriptions[module_name].append(subscriber)
+                self._subscriptions[module_name].append(subscriber)
             return
 
         # Similar to above. First subscriber to subscribe to this module.
         if listener_name not in self.subscriptions.keys():
-            self.subscriptions[listener_name]
-        self.subscriptions[listener_name].append(subscriber)
+            self._subscriptions[listener_name]
+        self._subscriptions[listener_name].append(subscriber)
 
 
     def parse_notification(self, listener_name, notification):
@@ -164,10 +164,10 @@ class ServerShell:
         notification: The actual notification.
         """
         # No one subscribed to this listener.
-        if listener_name not in self.subscriptions.keys():
+        if listener_name not in self._subscriptions.keys():
             return
 
-        for module in self.subscriptions[listener_name]:
+        for module in self._subscriptions[listener_name]:
             if not isinstance(module, SubscriberServerModule):
                 raise InvalidSubscriber(module)
 

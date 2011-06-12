@@ -30,12 +30,17 @@ from twisted.internet.protocol import ServerFactory
 from twisted.internet.protocol import DatagramProtocol
 
 from pysnmp.proto import api
-from pyasn1.codec.ber import decoder
+from pysnmp.proto.mpmod.rfc3412 import SNMPv3Message, ScopedPDU
+from pyasn1.codec.ber import decoder, encoder
 import pyasn1.type.univ
+from pysnmp.proto.secmod.rfc3414 import auth, priv, localkey
+
+from Crypto.Hash import MD5, SHA, HMAC
 
 import traceback
 from copy import copy
 import time
+import string
 
 
 class SNMPListener(ListenerServerModule, ServerModule):
@@ -74,6 +79,9 @@ class SNMPListener(ListenerServerModule, ServerModule):
         snmp_version = int(api.decodeMessageVersion(data))
         if snmp_version in api.protoModules:
             prot_module = api.protoModules[snmp_version]
+        elif snmp_version == 3:
+            self.parse_snmpv3_trap(data, host)
+            return
         else:
             raise UnsupportedSNMPVersion(snmp_version)
 
@@ -273,9 +281,99 @@ class SNMPListener(ListenerServerModule, ServerModule):
             traceback.print_exc()
 
 
+    def parse_snmpv3_trap(self, trap_data, host):
+        """
+        Parses a SNMPv3 trap. It will first authenticate/decrypt as
+        configured, then it will parse the PDU using the
+        parse_snmpv2_pdu() method.
+        """
+        message, temp = decoder.decode(trap_data, asn1Spec=SNMPv3Message())
+
+        # Trap notification main sections
+        header_data = message.getComponentByPosition(1)
+        security_param = message.getComponentByPosition(2)
+        security_param = decoder.decode(security_param)[0]
+
+        # Get the header relevant data
+        flags = header_data.getComponentByPosition(2)
+        security_model = header_data.getComponentByPosition(3)
+
+        # Get if the message is authenticated and encrypted from the flags
+        for ch in flags:
+            flags = ord(ch)
+            break
+        is_auth = (0x01 & flags) != 0
+        is_priv = (0x02 & flags) != 0
+
+        # Get the relevant security parameters
+        authoritative_engine_id = security_param.getComponentByPosition(0)
+        engine_boots = security_param.getComponentByPosition(1)
+        engine_time = security_param.getComponentByPosition(2)
+        user_name = security_param.getComponentByPosition(3)
+        digest = security_param.getComponentByPosition(4)
+        priv_salt = security_param.getComponentByPosition(5)
+
+        # Authenticate the message
+        if is_auth:
+            auth_mod = self.get_v3_auth_module(user_name)
+            auth_key = self.get_v3_auth_key(user_name, authoritative_engine_id)
+            try:
+                auth_mod.authenticateIncomingMsg(auth_key, digest, trap_data)
+            except Exception, e:
+                # Authentication failed.
+                traceback.print_exc()
+                # TODO: log this. maybe generate a notification.
+
+        # Decrypt the message
+        pdu = message.getComponentByPosition(3)
+        if is_priv:
+            pdu = pdu.getComponentByPosition(1)
+        else:
+            pdu = pdu.getComponentByPosition(0)
+        priv_mod = self.get_v3_priv_module(user_name)
+        priv_key = self.get_v3_priv_key(user_name, authoritative_engine_id)
+        priv_param = (engine_boots, engine_time, priv_salt)
+        pdu = priv_mod.decryptData(priv_key, priv_param, pdu)
+        if is_priv:
+            pdu = decoder.decode(pdu, asn1Spec=ScopedPDU())[0]
+            print pdu
+        pdu = pdu.getComponentByPosition(2).getComponentByPosition(6)
+
+        self.parse_snmpv2_pdu(api.v2c, pdu, host)
+
+
     def listen(self):
         reactor.listenUDP(self.port, SNMPDatagramProtocol(self))
 
+
+    def get_v3_auth_module(self, user_name):
+        """
+        Returns the associated authentication module with the given
+        user. Possible values: HmacMd5, HmacSha, NoAuth.
+        """
+        # TODO: get the correct module for the given user
+        return SNMPUtils.snmpv3_md5_auth
+
+
+    def get_v3_auth_key(self, user_name, engine_id):
+        """ Returns the authentication key associated with the given user """
+        # TODO: get the correct key
+        return localkey.passwordToKeyMD5('auth_pass', engine_id)
+
+
+    def get_v3_priv_module(self, user_name):
+        """
+        Returns the associated encryption module with the given
+        user. Possible values: Des, NoPriv.
+        """
+        # TODO: get the correct module for the given user
+        return SNMPUtils.snmpv3_des_priv
+
+
+    def get_v3_priv_key(self, user_name, engine_id):
+        """ Returns the private key associated with the given user """
+        # TODO: get the correct key
+        return localkey.passwordToKeyMD5('priv_pass', engine_id)
 
 
 class ASN1Type:
@@ -331,6 +429,16 @@ class ASN1Type:
 
 
 class SNMPUtils:
+
+    # SNMPv3 authentication protocols
+    snmpv3_md5_auth = auth.hmacmd5.HmacMd5()
+    snmpv3_sha_auth = auth.hmacsha.HmacSha()
+    snmpv3_no_auth = auth.noauth.NoAuth()
+
+    # SNMPv3 encryption protocols
+    snmpv3_des_priv = priv.des.Des()
+    snmpv3_no_priv = priv.nopriv.NoPriv()
+
 
     @staticmethod
     def parse_description(variables_dict):
