@@ -100,6 +100,9 @@ class Database:
 
     def store_notification(self, notification):
         """ Called when a notification was received """
+        # If we shouldn't store the notifications
+        if not self.store_notifications:
+            return
 
         # Make sure we succcesfully connected to the db
         if self.database == None:

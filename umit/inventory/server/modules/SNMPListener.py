@@ -54,6 +54,10 @@ class SNMPListener(ListenerServerModule, ServerModule):
     def __init__(self, configs, shell):
         ServerModule.__init__(self, configs, shell)
 
+        # The users dict (USM)
+        self.users = dict()
+
+        # Get the configurations
         self.port = int(self.options[SNMPListener.port_option])
         self.community_string = self.options[SNMPListener.community_string]
         self.check_community_string =\
@@ -66,6 +70,21 @@ class SNMPListener(ListenerServerModule, ServerModule):
 
     def get_protocol_name(self):
         return 'SNMP'
+
+
+    def init_database_operations(self):
+        """
+        Called when we should init database operations. Will use this method
+        to initialise the USM.
+        """
+        db_entries = self.shell.database.find(SNMPv3User.collection_name)
+        for user_entry in db_entries:
+            try:
+                user_obj = SNMPv3User(user_entry)
+            except:
+                continue
+
+            self.users[user_obj.user_name] = user_obj
 
 
     def init_default_settings(self):
@@ -313,6 +332,9 @@ class SNMPListener(ListenerServerModule, ServerModule):
         digest = security_param.getComponentByPosition(4)
         priv_salt = security_param.getComponentByPosition(5)
 
+        # Make sure we have the user in our database
+        self._assert_user_in_database(user_name)
+
         # Authenticate the message
         if is_auth:
             auth_mod = self.get_v3_auth_module(user_name)
@@ -346,19 +368,33 @@ class SNMPListener(ListenerServerModule, ServerModule):
         reactor.listenUDP(self.port, SNMPDatagramProtocol(self))
 
 
+    def _assert_user_in_database(self, user_name):
+        """ Tests if the user is in the database """
+        if user_name not in self.users.keys():
+            raise SNMPv3AuthenticationFailed('Missing user %s from database'\
+                    % user_name)
+
+
     def get_v3_auth_module(self, user_name):
         """
         Returns the associated authentication module with the given
         user. Possible values: HmacMd5, HmacSha, NoAuth.
         """
-        # TODO: get the correct module for the given user
-        return SNMPUtils.snmpv3_md5_auth
+        user_obj = self.users[user_name]
+
+        # Return the appropiate auth module
+        auth_mode = user_obj.auth_mode
+        if auth_mode == SNMPv3User.hmac_md5_auth:
+            return SNMPUtils.snmpv3_md5_auth
+        if auth_mode == SNMPv3User.hmac_sha_auth:
+            return SNMPUtils.snmpv3_sha_auth
+        return SNMPUtils.no_auth
 
 
     def get_v3_auth_key(self, user_name, engine_id):
         """ Returns the authentication key associated with the given user """
-        # TODO: get the correct key
-        return localkey.passwordToKeyMD5('auth_pass', engine_id)
+        user_obj = self.users[user_name]
+        return user_obj.get_auth_key(engine_id)
 
 
     def get_v3_priv_module(self, user_name):
@@ -366,14 +402,20 @@ class SNMPListener(ListenerServerModule, ServerModule):
         Returns the associated encryption module with the given
         user. Possible values: Des, NoPriv.
         """
-        # TODO: get the correct module for the given user
-        return SNMPUtils.snmpv3_des_priv
+        user_obj = self.users[user_name]
+
+        # Return the appropiate priv module
+        priv_mode = user_obj.priv_mode
+        if priv_mode == SNMPv3User.des_priv:
+            return SNMPUtils.snmpv3_des_priv
+        return SNMPUtils.snmpv3_no_priv
 
 
     def get_v3_priv_key(self, user_name, engine_id):
         """ Returns the private key associated with the given user """
-        # TODO: get the correct key
-        return localkey.passwordToKeyMD5('priv_pass', engine_id)
+        user_obj = self.users[user_name]
+        return user_obj.get_priv_key(engine_id)
+
 
 
 class ASN1Type:
@@ -583,6 +625,72 @@ class SNMPv2cNotificationFields(NotificationFields):
 
 
 
+class SNMPv3User:
+    """
+    Class to define a SNMPv3 user.
+    It's used to authenticate/decrypt a TRAP received from a device.
+    """
+
+    # The collection where these entries will be stored
+    collection_name = 'snmpv3_usm_users'
+
+    # Fields
+    auth_mode = 'auth_mode'
+    priv_mode = 'priv_mode'
+    auth_pass = 'auth_pass'
+    priv_pass = 'priv_pass'
+    user_name = 'user_name'
+
+    # Authentication mode values
+    no_auth = 0
+    hmac_md5_auth = 1
+    hmac_sha_auth = 2
+
+    # Privacy mode values
+    no_priv = 0
+    des_priv = 1
+
+
+    def __init__(self, db_fields):
+        """ Constructs a SNMPv3User object from a db object. """
+        try:
+            self.auth_mode = db_fields[SNMPv3User.auth_mode]
+            self.priv_mode = db_fields[SNMPv3User.priv_mode]
+            self.auth_pass = db_fields[SNMPv3User.auth_pass]
+            self.priv_pass = db_fields[SNMPv3User.priv_pass]
+            self.user_name = db_fields[SNMPv3User.user_name]
+        except:
+            raise InvalidSNMPv3User('Missing field in database ')
+
+        if self.auth_mode == no_auth and self.priv_mode != no_priv:
+            raise InvalidSNMPv3User('Invalid NoAuthPriv security level')
+
+
+    def get_priv_key(self, engine_id):
+        """
+        Returns the privacy key associated with this user.
+        engine_id: The engine_id from which the TRAP originated.
+        """
+        if self.auth_mode == SNMPv3User.hmac_sha_auth:
+            return localkey.passwordToKeySHA(self.priv_pass, engine_id)
+        if self.auth_mode == SNMPv3User.hmac_md5_auth:
+            return localkey.passwordToKeyMD5(self.priv_pass, engine_id)
+        return None
+
+
+    def get_auth_key(self, engine_id):
+        """
+        Returns the authentication key associated with this user.
+        engine_id: The engine_id from which the TRAP originated.
+        """
+        if self.auth_mode == SNMPv3User.hmac_sha_auth:
+            return localkey.passwordToKeySHA(self.auth_pass, engine_id)
+        if self.auth_mode == SNMPv3User.hmac_md5_auth:
+            return localkey.passwordToKeyMD5(self.auth_pass, engine_id)
+        return None
+
+
+
 class UnsupportedSNMPVersion(Exception):
 
     def __init__(self, snmp_version):
@@ -608,6 +716,24 @@ class InvalidSNMPType(Exception):
     def __init__(self, host, port):
         self.err_msg = 'Only supporting TRAP PDU\'s. Source host: %s:%s' %\
                 (str(host), str(port))
+
+    def __str__(self):
+        return repr(self.err_msg)
+
+
+class InvalidSNMPv3User(Exception):
+
+    def __init__(self, reason):
+        self.err_msg = reason
+
+    def __str__(self):
+        return repr(self.err_msg)
+
+
+class SNMPv3AuthenticationFailed(Exception):
+
+    def __init__(self, reason):
+        self.err_msg = reason
 
     def __str__(self):
         return repr(self.err_msg)
