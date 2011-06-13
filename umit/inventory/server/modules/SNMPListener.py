@@ -35,8 +35,6 @@ from pyasn1.codec.ber import decoder, encoder
 import pyasn1.type.univ
 from pysnmp.proto.secmod.rfc3414 import auth, priv, localkey
 
-from Crypto.Hash import MD5, SHA, HMAC
-
 import traceback
 from copy import copy
 import time
@@ -85,6 +83,13 @@ class SNMPListener(ListenerServerModule, ServerModule):
                 continue
 
             self.users[user_obj.user_name] = user_obj
+
+        # TODO: delete this after testing is done:
+        test_user = SNMPv3User(user_name='test_user',\
+                auth_mode=SNMPv3User.hmac_md5_auth,\
+                priv_mode=SNMPv3User.des_priv,\
+                auth_pass='auth_pass', priv_pass='priv_pass')
+        self.add_snmpv3_user(test_user)
 
 
     def init_default_settings(self):
@@ -341,9 +346,10 @@ class SNMPListener(ListenerServerModule, ServerModule):
             auth_key = self.get_v3_auth_key(user_name, authoritative_engine_id)
             try:
                 auth_mod.authenticateIncomingMsg(auth_key, digest, trap_data)
-            except Exception, e:
+            except:
                 # Authentication failed.
-                traceback.print_exc()
+                reason = 'Invalid auth password for user %s' % user_name
+                raise SNMPv3AuthenticationFailed(reason)
                 # TODO: log this. maybe generate a notification.
 
         # Decrypt the message
@@ -357,8 +363,11 @@ class SNMPListener(ListenerServerModule, ServerModule):
         priv_param = (engine_boots, engine_time, priv_salt)
         pdu = priv_mod.decryptData(priv_key, priv_param, pdu)
         if is_priv:
-            pdu = decoder.decode(pdu, asn1Spec=ScopedPDU())[0]
-            print pdu
+            try:
+                pdu = decoder.decode(pdu, asn1Spec=ScopedPDU())[0]
+            except:
+                reason = 'Invalid priv password for user %s' % user_name
+                raise SNMPv3DecryptionFailed(reason)
         pdu = pdu.getComponentByPosition(2).getComponentByPosition(6)
 
         self.parse_snmpv2_pdu(api.v2c, pdu, host)
@@ -415,6 +424,19 @@ class SNMPListener(ListenerServerModule, ServerModule):
         """ Returns the private key associated with the given user """
         user_obj = self.users[user_name]
         return user_obj.get_priv_key(engine_id)
+
+
+    def add_snmpv3_user(self, snmpv3_user):
+        """ Adds a SNMPv3User to the database """
+
+        # If the user_name already exists, return. XXX
+        if snmpv3_user.user_name in self.users.keys():
+            print '%s exists' % snmpv3_user.user_name
+            return
+
+        self.users[snmpv3_user.user_name] = snmpv3_user
+        self.shell.database.insert(SNMPv3User.collection_name,\
+                snmpv3_user.db_fields)
 
 
 
@@ -651,8 +673,33 @@ class SNMPv3User:
     des_priv = 1
 
 
-    def __init__(self, db_fields):
-        """ Constructs a SNMPv3User object from a db object. """
+    def __init__(self, db_fields=None, user_name=None,\
+            auth_mode=0, priv_mode=0, auth_pass='', priv_pass=''):
+        """
+        Constructs a SNMPv3User object from a db object.
+
+        There are 2 initialisations modes:
+        * When db_fields is the object extracted from the database and the
+        object properties will be copied from this.
+        * When db_fields is None and the information will be taken from the
+        other parameters.
+        """
+        if db_fields == None and user_name == None:
+            raise InvalidSNMPv3User('Invalid initialisation')
+
+        if db_fields != None:
+            self._init_from_db(db_fields)
+        else:
+            self._init_from_param(user_name, auth_mode, priv_mode,\
+                    auth_pass, priv_pass)
+
+        if self.auth_mode == SNMPv3User.no_auth and\
+                self.priv_mode != SNMPv3User.no_priv:
+            raise InvalidSNMPv3User('Invalid NoAuthPriv security level')
+
+
+    def _init_from_db(self, db_fields):
+        # Inits the object from a database object.
         try:
             self.auth_mode = db_fields[SNMPv3User.auth_mode]
             self.priv_mode = db_fields[SNMPv3User.priv_mode]
@@ -662,8 +709,30 @@ class SNMPv3User:
         except:
             raise InvalidSNMPv3User('Missing field in database ')
 
-        if self.auth_mode == no_auth and self.priv_mode != no_priv:
-            raise InvalidSNMPv3User('Invalid NoAuthPriv security level')
+        # Save it to be used later if needed.
+        self.db_fields = db_fields
+
+
+    def _init_from_param(self, user_name, auth_mode, priv_mode,\
+            auth_pass, priv_pass):
+        # Inits the object from the given parameters
+        if type(user_name) != str:
+            raise InvalidSNMPv3User('The user name must be of type str')
+
+        # The actual initialisations
+        self.auth_mode = auth_mode
+        self.priv_mode = priv_mode
+        self.auth_pass = auth_pass
+        self.priv_pass = priv_pass
+        self.user_name = user_name
+
+        # Save the db_fields to be used later if needed.
+        self.db_fields = dict()
+        self.db_fields[SNMPv3User.auth_mode] = self.auth_mode
+        self.db_fields[SNMPv3User.priv_mode] = self.priv_mode
+        self.db_fields[SNMPv3User.auth_pass] = self.auth_pass
+        self.db_fields[SNMPv3User.priv_pass] = self.priv_pass
+        self.db_fields[SNMPv3User.user_name] = self.user_name
 
 
     def get_priv_key(self, engine_id):
@@ -731,6 +800,15 @@ class InvalidSNMPv3User(Exception):
 
 
 class SNMPv3AuthenticationFailed(Exception):
+
+    def __init__(self, reason):
+        self.err_msg = reason
+
+    def __str__(self):
+        return repr(self.err_msg)
+
+
+class SNMPv3DecryptionFailed(Exception):
 
     def __init__(self, reason):
         self.err_msg = reason

@@ -65,9 +65,6 @@ class ServerCore:
                     raise CorruptServerModule(module_name, module_path,\
                             CorruptServerModule.get_name)
 
-                if name == 'Database':
-                    self.database = module_obj
-
             except Exception, e:
                 traceback.print_exc()
                 continue
@@ -78,6 +75,10 @@ class ServerCore:
         for module in self.modules:
             if isinstance(module, SubscriberServerModule):
                 module.subscribe()
+
+        # Init the database operations for each module.
+        for module in self.modules:
+            module.init_database_operations()
 
 
     def run(self):

@@ -141,8 +141,10 @@ class Database:
         sorted_fields: A list of (field_name, direction) to sort the results.
         direction should be True for ascending sort and False for descending.
         """
-        for entry in sorted_fields:
-            entry[1] = pymongo.ASCENDING if entry[1] else pymongo.DESCENDING
+        if sorted_fields != None:
+            for entry in sorted_fields:
+                entry[1] = pymongo.ASCENDING if entry[1] else\
+                           pymongo.DESCENDING
 
         return self.database[collection_name].find(spec=search_spec,\
                 fields=returned_fields, sort=sorted_fields)
