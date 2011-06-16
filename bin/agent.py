@@ -30,6 +30,7 @@ from umit.inventory.agent.Core import CorruptAgentModule
 def main(args):
     """The Umit Agent main function"""
 
+
     # The Agent Configurations. See umit/inventory/agent/Configs.py
     # for details regarding the configuration file location and default
     # settings.

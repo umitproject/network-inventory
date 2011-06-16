@@ -22,18 +22,26 @@ import time
 import psutil
 from cStringIO import StringIO
 from socket import gethostname
+from collections import deque
 
 from umit.inventory.agent import Core
 from umit.inventory.agent.MonitoringModule import MonitoringModule
 from umit.inventory.common import NotificationTypes
 
 
-WINDOWS = False
-POSIX = False
-if os.name == 'nt':
-    WINDOWS = True
-else:
-    POSIX = True
+LINUX = sys.platform.lower().startswith('linux')
+OSX = sys.platform.lower().startswith('darwin')
+BSD = sys.platform.lower().startswith('freebsd')
+POSIX = os.name == 'posix'
+WIN = sys.platform.lower().startswith('win32')
+
+if WIN:
+    try:
+        import win32api
+        import wmi
+        import win32file
+    except:
+        WIN = False
 
 
 class DeviceSensor(MonitoringModule):
@@ -95,16 +103,6 @@ class DeviceSensor(MonitoringModule):
 
     # Measurement functions
 
-    def get_uptime(self):
-        """
-        Returns the number of seconds (floating point precission) of the
-        device uptime.
-
-        Availability: Windows, UNIX
-        """
-        return time.time() - self.get_boot_time()
-
-
     def get_boot_time(self):
         """
         Returns the boot time of the device measured in seconds since
@@ -126,19 +124,6 @@ class DeviceSensor(MonitoringModule):
         return time.asctime(boot_time_struct)
 
 
-    def get_load_average(self):
-        """
-        Returns a tuple representing the load average over the last
-        1, 5 and 15 minutes.
-
-        Availability: UNIX
-        """
-        if not POSIX:
-            return None
-
-        return os.getloadavg()
-
-
     def get_process_info(self):
         """
         Returns output similar to a top snapshot, showing the following
@@ -157,67 +142,209 @@ class DeviceSensor(MonitoringModule):
         return str_output.getvalue()
 
 
-    def get_ram_total_size(self):
+    def get_hdd_total_space(self):
         """
-        Returns the total size of the RAM.
+        Returns the total amount of HDD space in bytes.
 
-        Availability: Windows, UNIX
+        Availability: Windows
         """
-        return psutil.TOTAL_PHYMEM
+        # Compute total space on
+        if WIN:
+            drives = win32api.GetLogicalDriveStrings()
+            total_size = 0
+
+            # Iterate over all the drives
+            for drive in drives:
+                # Only computing for HDD drives
+                if win32file.GetDriveType(drive) == win32file.DRIVE_FIXED:
+                    sizes = win32api.GetDiskFreeSpace(drive)
+                    total_size += sizes[0] * sizes[1] * sizes[3]
+
+            return total_size
 
 
-    def get_ram_avail_size(self):
+
+class DeviceValueTracker:
+    """
+    Class to track a given device value (like recv_bytes/sec, cpu usage, etc).
+    The value can be tracked in 2 modes:
+        * the latest value recorded (eg: total bytes received)
+        * the average of the value over a pariod of time (eg: bytes/sec)
+    """
+
+    def __init__(self, measurement_gen, average=False, time_interval_size=1.0):
         """
-        Return the size of available RAM.
-
-        Availability: Windows, UNIX
+        measurement_gen: A MeasurementGenerator object.
+        average: If the tracker should compute the average.
+        time_interval_size: the time period over which the average should be
+        computed. Only relevant if average is True.
         """
-        return psutil.avail_phymem()
+        self.measurement_gen = measurement_gen
+        self.measurement_gen.register_tracker(self)
+        self.average = average
+        self.time_interval_size = time_interval_size
+
+        if self.average:
+            self.measurement_avg = MeasurementAverage(time_interval_size)
+        else:
+            self.instant_value = 0.0
 
 
-    def get_ram_used_size(self):
+    def get_value(self):
+        """ Returns the latest value for this tracker (average or not) """
+        latest_value = measurement_gen.get_latest_value()
+        if latest_value != None:
+            if self.average:
+                self.measurement_avg.add_measurement(latest_value)
+                return self.measurement_avg.get_average()
+            else:
+                self.instant_value = latest_value
+                return self.instant_value
+
+
+
+class MeasurementGenerator:
+    """ An abstract class which does a measurement. """
+
+    def __init__(self):
+        self.trackers = dict()
+        self.latest_value = 0.0
+
+
+    def register_tracker(self, tracker):
         """
-        Returns the size of used RAM.
-
-        Availability: Windows, UNIX
+        DeviceValueTracker objects which use this object must register
+        themselvs so they won't receive duplicate values with the
+        get_latest_value() method.
         """
-        return psutil.used_phymem()
+        self.trackers[tracker] = False
 
 
-    def get_swap_total_size(self):
+    def measure(self):
         """
-        Returns the total size of the swap space.
-
-        Availability: Windows, UNIX
+        Does the actual measurement. Must be implemented and call this
+        function first.
         """
-        return psutil.total_virtmem()
+        for tracker in self.trackers.keys():
+            self.trackers[tracker] = False
 
 
-    def get_swap_avail_size(self):
+    def get_latest_value(self, tracker=None):
         """
-        Returns the available swap size.
-
-        Availability: Windows, UNIX
+        Returns the latest measured value or None if the tracker was
+        registered and it already requested this value.
+        tracker: The tracker which requests the value. If it's None, then
+        it won't check if it was already returned.
         """
-        return psutil.avail_virtmem()
+        if tracker == None:
+            return self.latest_value
+
+        if tracker not in self.trackers.keys():
+            return self.latest_value
+
+        if self.trackers[tracker]
+            return None
+        return self.latest_value
 
 
-    def get_swap_used_size(self):
-        """
-        Returns the used swap size.
 
-        Availability: Windows, UNIX
-        """
-        return psutil.used_virtmem()
+# Measurement generators -- START
+
+class UptimeGenerator:
+    """
+    Computes the number of seconds (floating point precision) of
+    the device uptime.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        self.latest_value = time.time() - self.get_boot_time()
 
 
-    def get_open_ports(self):
-        """
-        Returns the number of open UDP and TCP ports on the host.
-        Warning: Requries super-used access rights.
+class LoadAverage1Generator:
+    """
+    Computes the load average over the last minute.
+    Availability: UNIX
+    """
 
-        Availability: Windows, UNIX
-        """
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if not POSIX:
+            self.latest_value = None
+        self.latest_value = os.getloadavg[0]
+
+
+class LoadAverage5Generator:
+    """
+    Computes the load average over the last 5 minutes.
+    Availability: UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if not POSIX:
+            self.latest_value = None
+        self.latest_value = os.getloadavg[1]
+
+
+class LoadAverage15Generator:
+    """
+    Computes the load average over the last 15 minutes.
+    Availability: UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if not POSIX:
+            self.latest_value = None
+        self.latest_value = os.getloadavg[2]
+
+
+class RamAvailableGenerator:
+    """
+    Computes the available RAM size in bytes.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        self.latest_value = psutil.avail_phymem()
+
+
+class SwapAvailableGenerator:
+    """
+    Computes the available SWAP size in bytes.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        self.latest_value = psutil.avail_virtmem()
+
+
+class SwapTotalGenerator:
+    """
+    Computes the total SWAP size in bytes.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        self.latest_value = total_virtmem()
+
+
+class OpenPortsGenerator:
+    """
+    Computes the number of open UDP and TCP ports on the host.
+    Warning: Requires super-user access rights.
+
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+
         port_count = 0
 
         # Iterate over the processes and count how many ports each process
@@ -229,18 +356,104 @@ class DeviceSensor(MonitoringModule):
             except:
                 continue
 
-        return port_count
+        self.latest_value = port_count
 
 
-    def hostname_changed(self):
-        """
-        Returns True if a hostname change was detected since the last call
-        (the difference between the calls being self.test_time).
+class HostnameChangedGenerator:
+    """
+    Computes if the hostname was changed or not. The measure() method sets
+    self.latest_value to True if the hostname was changed. False otherwise.
+    Availability: Windows, UNIX
+    """
 
-        Availability: Windows, UNIX
-        """
+    def __init__(self):
+        MeasurementGenerator.__init__(self)
+        self.initial_host_name = gethostname()
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+
         current_host_name = gethostname()
         if current_host_name == self.initial_host_name:
-            return False
-        return True
+            self.latest_value = False
+            return
+        self.initial_host_name = current_host_name
+        self.latest_value = True
+
+
+# Measurement generators -- END
+
+
+
+class MeasurementAverage:
+    """
+    Class optimised to compute the average of a measurement over a predefined
+    period of time (which is given at construction). It holds an internal
+    queue of the measurements so if the period of the time is bigger, so the
+    size of the queue will grow.
+    The expected average computation time is constant.
+    The measurement must be an int or a float.
+    """
+
+    min_time_interval_size = 0.1
+
+    def __init__(self, time_interval_size):
+        """
+        time_interval_size: A float representing the number of seconds for
+        which the average of the measurements should be computed. It must
+        be at least MeasurementAverage.min_time_interval_size.
+        """
+        if self.time_interval_size < MeasurementAverage.min_time_interval_size:
+            raise TimeIntervalSizeTooLow(time_interval_size,\
+                    MeasurementAverage.min_time_interval_size)
+
+        self.queue = deque()
+        self.measurements_sum = 0.0
+        self.first_timestamp = 0.0
+        self.last_timestamp = 0.0
+        self.size = 0
+        self.time_interval_size
+
+
+    def add_measurement(self, measurement):
+        """
+        Adds a measurement to the queue.
+        measurement: an int or float which represents the measurement.
+        """
+        # Only measuring int or floats
+        if type(measurement) != float and type(measurement) != int:
+            return
+
+        # Also adding a timestamp to the measurement
+        current_time = time.time()
+        self.queue.append((measurement, current_time))
+
+        self.size += 1
+        self.measurement_sum += float(measurement)
+
+        # Deleting measurements which are too old for this time interval
+        # This can't empty the queue because of the minimum time interval size
+        # requirement.
+        while self.queue[0][1] + self.time_interval_size > current_time:
+            self.popleft()
+            self.size -= 1
+
+
+    def get_average(self):
+        """
+        Returns the average of the measurements over the given time interval
+        size at construction.
+        """
+        return self.measurement_sum/self.size
+
+
+
+class TimeIntervalSizeTooLow(Exception):
+
+    def __init__(self, time_interval, time_interval_min):
+        self.err_msg = 'Minimum time interval supported: %s. Got: %s' %\
+                (str(time_interval), str(time_interval_min))
+
+    def __str__(self):
+        return repr(self.err_msg)
 
