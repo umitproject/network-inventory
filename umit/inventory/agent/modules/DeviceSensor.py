@@ -1049,6 +1049,7 @@ class WindowsNetworkTraffic(NetworkTraffic):
             self.sent_bytes = sent_b_temp
             self.received_packets = recv_p_temp
             self.sent_packets = sent_p_temp
+            self.traffic_lock.release()
         pythoncom.CoUnitialize()
 
 
