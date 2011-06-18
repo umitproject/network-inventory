@@ -23,6 +23,8 @@ import psutil
 from cStringIO import StringIO
 from socket import gethostname
 from collections import deque
+from threading import Thread
+from threading import Lock
 
 from umit.inventory.agent import Core
 from umit.inventory.agent.MonitoringModule import MonitoringModule
@@ -40,6 +42,7 @@ if WIN:
         import win32api
         import wmi
         import win32file
+        import pythoncom
     except:
         WIN = False
 
@@ -49,17 +52,20 @@ class DeviceSensor(MonitoringModule):
     # The name of the fields in the configuration file
     test_time = 'test_time'
     report_time = 'report_time'
+    report_template_file = 'report_template_file'
+    notification_cond_file = 'notification_cond_file'
 
 
     def __init__(self, configs, agent_main_loop):
         MonitoringModule.__init__(self, configs, agent_main_loop)
 
-        # Store initial host name to detect a change
-        self.initial_host_name = gethostname()
-
         # Get configurations
         self.test_time = float(self.options[DeviceSensor.test_time])
         self.report_time = float(self.options[DeviceSensor.report_time])
+        self.report_template_file =\
+                str(self.options[DeviceSensor.report_template_file])
+        self.notification_cond_file =\
+                str(self.options[DeviceSensor.notification_cond_file])
 
 
     def get_name(self):
@@ -84,12 +90,17 @@ class DeviceSensor(MonitoringModule):
     def init_default_settings(self):
         self.options[DeviceSensor.test_time] = '0.1'
         self.options[DeviceSensor.report_time] = '300'
+        self.options[DeviceSensor.report_template_file] =\
+                os.path.join('umit', 'inventory', 'agent', 'modules',\
+                'device_sensor_report_template.txt')
+        self.options[DeviceSensor.notification_cond_file] =\
+                os.path.join('umit', 'inventory', 'agent', 'modules',\
+                'device_sensor_notification_cond.txt')
 
 
     def measure(self):
         """ Called each self.test_time seconds to measure device info """
-        print 'Measuring ...'
-        uptime = self.get_uptime()
+        pass
 
 
     def report(self):
@@ -97,70 +108,194 @@ class DeviceSensor(MonitoringModule):
         Called when the Device Sensor should send a report (as specified)
         with device information.
         """
-        print 'Sending report ...'
         pass
 
 
-    # Measurement functions
 
-    def get_boot_time(self):
-        """
-        Returns the boot time of the device measured in seconds since
-        the epoch.
+class MeasurementManager:
+    """
+    Manages the measurement generators and the static measurements (like
+    the ram total size). It holds a table of reference with associated
+    names to the measurements which can be get with the get_measurement()
+    function.
 
-        Availability: Windows, UNIX
-        """
-        return psutil.BOOT_TIME
+    Provided variables:
+        * boot_time: Float representing the number of seconds since the
+          epoch representing the time when the device booted.
+        * hostname: The configured hostname.
+        * boot_time_date: String representing the boot time above in the
+          'Sun Jun 20 23:21:05 1993' form.
+        * uptime: Float representing the device uptime in seconds.
+        * process_info: String similar with the one provided by top which
+          shows: USER, PID, %CPU, %MEM, VSZ, RSS, START, TIME and COMMAND.
+        * load_avg1: Float representing the load average over the last
+          minute (UNIX only).
+        * load_avg5: Float representing the load average over the last
+          5 minutes (UNIX only).
+        * load_avg15: Float representing the load average over the last
+          15 minutes (UNIX only).
+        * ram_avail: Integer representing the number of available RAM bytes.
+        * ram_used: Integer representing the number of used RAM bytes.
+        * ram_total: Integer representing the number of total RAM bytes.
+        * swap_avail: Integer representing the number of available SWAP bytes.
+        * swap_used: Integer representing the number of used SWAP bytes.
+        * swap_total: Integer representing the number of total SWAP bytes.
+        * partition_avail: Integer representing the number of free bytes on a
+          set of partitions.
+        * open_ports: Integer representing the number of open TCP or UDP ports.
+        * hostname_changed: Boolean which is true if the hostname was changed.
+        * net_recv_bytes: Integer representing the number of received bytes.
+        * net_sent_bytes: Integer representing the number of sent bytes.
+        * net_total_bytes: Integer representing the sum of received and sent
+          bytes.
+        * net_recv_bps: Integer representing the number of received bytes
+          per second.
+        * net_sent_bps: Integer representing the number of sent bytes per
+          second.
+        * net_total_bps: Integer representing the sum of the received and
+          sent bytes per second.
+        * net_pack_recv: Integer representing the number of received packets.
+        * net_pack_sent: Integer representing the number of sent packets.
+        * net_pack_total: Integer representing the sum of received and sent
+          packets.
+        * ram_percent: Float representing division between ram_avail/ram_total.
+        * cpu_percent: Float representing the system-wide cpu utilisation as a
+          percentage.
+        * partition_percent: Float representing the division between the free
+          space on a set of partitions and the total space.
+
+    """
+
+    def __init__(self):
+
+        # Initialise constant variables
+        self.const_measurements = {\
+                'boot_time' : self.get_boot_time,\
+                'boot_time_data' : self.get_boot_time_date,\
+                'ram_total' : self.get_ram_total\,
+                'hostname' : self.get_hostname\
+                }
+
+        # Non-configurable measurement objects
+        self.measurement_objects = {\
+                'uptime' : UptimeGenerator(),\
+                'load_avg1' : LoadAverage1Generator(),\
+                'load_avg5' : LoadAverage5Generator(),\
+                'load_avg15' : LoadAverage15Generator(),\
+                'ram_avail' : RamAvailableGenerator(),\
+                'ram_used' : RamUsedGenerator(),\
+                'swap_avail' : SwapAvailableGenerator(),\
+                'swap_total' : SwapTotalGenerator(),\
+                'open_ports' : OpenPortsGenerator(),\
+                'net_recv_bytes' : NetworkReceivedBytesGenerator(),\
+                'net_sent_bytes' : NetworkSentBytesGenerator(),\
+                'net_total_bytes' : NetworkTotalBytesGenerator(),\
+                'net_recv_bps' : NetworkReceivedBpsGenerator(),\
+                'net_sent_bps' : NetworkSentBpsGenerator(),\
+                'net_total_bps' : NetworkTotalBpsGenerator(),\
+                'net_pack_recv' : NetworkPacketsReceivedGenerator(),\
+                'net_pack_sent' : NetworkPacketsSentGenerator(),\
+                'net_pack_total' : NetworkPacketsTotalGenerator(),\
+                'ram_percent' : RamPercentGenerator(),\
+                'cpu_percent' : CpuPercentGenerator()\
+                }
+
+        # The classes for the configurable measurements
+        self.conf_measurement_classes = {\
+                'partition_avail' : PartitionAvailableGenerator,\
+                'partition_percent' : PartitionPercentGenerator,\
+                'process_info' : ProcessInfoGenerator\
+                }
+
+        # To save the parameters for the configurable measurements
+        self.conf_measurement_ids = {}
+
+        # The variables which should be measured
+        self.measured_variables = {}
+
+        # To add new configurable measurement variables in the
+        # measured_variables dict
+        self.measured_variables_last_id = 0
 
 
-    def get_boot_time_string(self):
-        """
-        Returns a string with the form 'Sun Jun 20 23:21:05 1993' representing
-        the boot time of the device.
+        def add_variable(self, var_name, var_param=None):
+            """
+            Adds a measurement for a device variable. Raises an
+            InvalidVariableName exception if var_name isn't found.
+            var_name: The name of the variable to be measured.
+            var_param: If the variable is configurable, the parameters to
+            configure it. This is a dictionary - 'param_name' : param_value.
 
-        Availability: Windows, UNIX
-        """
-        boot_time_struct = time.gmtime(self.get_boot_time())
-        return time.asctime(boot_time_struct)
+            Returns: The ID for this measurement.
+            """
+            # Since is constant, the ID doesn't really matter
+            if var_name in self.const_measurements.keys():
+                return var_name
+
+            # The variable is already measured, returning it's name
+            if var_name in self.measured_variables.keys():
+                return var_name
+
+            # The variable isn't measured. Checking if it's non-configurable.
+            if var_name in self.measurement_objects.keys():
+                self.measured_variables[var_name] =\
+                        self.measurement_objects[var_name]
+                return var_name
+
+            # If it's a configurable variable
+            if var_name in self.conf_measurement_classes.keys():
+                # Check if this configurable variable is already measured
+                conf_measure_id = var_name + '::' + str(var_param)
+                if conf_var_id in self.conf_measurement_ids.keys():
+                    return self.conf_variables_ids[conf_var_id]
+
+                self.measured_variables_last_id += 1
+                new_id = str(self.measured_variables_last_id)
+                self.measured_variables[new_id] =\
+                        self.conf_measurement_classes[var_name](var_param)
+                self.conf_measurement_ids[conf_measure_id] = new_id
+                return new_id
+
+            raise InvalidVariableName(var_name)
 
 
-    def get_process_info(self):
-        """
-        Returns output similar to a top snapshot, showing the following
-        information per-process: user, pid, cpu percentage, mem percentage,
-        vsz, rss, start time, time running, command.
-
-        Availability: Windows, UNIX
-        """
-        # Redirecting stdout since psutil.test() prints to stdout
-        stdout_backup = sys.stdout
-        str_output = StringIO()
-        sys.stdout = str_output
-        psutil.test()
-
-        sys.stdout = stdout_backup
-        return str_output.getvalue()
+        def update(self):
+            """ Updates the variables with new measurements if required."""
+            for measurement_gen in self.measured_values.values():
+                self.measurement_gen.measure()
 
 
-    def get_hdd_total_space(self):
-        """
-        Returns the total amount of HDD space in bytes.
+        def get_variable(self, var_id):
+            """
+            Returns the latest value of a variable.
+            var_id: The id of the variable, which is the variable name for the
+            non-configurable variables and the value returned by
+            add_configurable_variable() for configurable variables.
+            """
+            if var_id in self.const_measurements.keys():
+                return self.const_measurements[var_id]()
 
-        Availability: Windows
-        """
-        # Compute total space on
-        if WIN:
-            drives = win32api.GetLogicalDriveStrings()
-            total_size = 0
+            if var_id in self.measured_variables.keys():
+                return self.measured_variables[var_id].get_lastest_value()
 
-            # Iterate over all the drives
-            for drive in drives:
-                # Only computing for HDD drives
-                if win32file.GetDriveType(drive) == win32file.DRIVE_FIXED:
-                    sizes = win32api.GetDiskFreeSpace(drive)
-                    total_size += sizes[0] * sizes[1] * sizes[3]
+            raise InvalidVariableName(var_id)
 
-            return total_size
+
+        def get_boot_time(self):
+            return psutil.BOOT_TIME
+
+
+        def get_boot_time_data(self):
+            boot_time_struct = time.gmtime(psutil.BOOT_TIME)
+            return time.asctime(boot_time_struct)
+
+
+        def get_ram_total(self):
+            return psutil.TOTAL_PHYMEM
+
+
+        def get_hostname(self):
+            return gethostname()
 
 
 
@@ -172,43 +307,54 @@ class DeviceValueTracker:
         * the average of the value over a pariod of time (eg: bytes/sec)
     """
 
-    def __init__(self, measurement_gen, average=False, time_interval_size=1.0):
+    # Tracking types
+    raw = 0
+    average = 1
+    differential = 2
+
+
+    def __init__(self, measurement_gen, track_type=0, time_interval_size=1.0):
         """
         measurement_gen: A MeasurementGenerator object.
-        average: If the tracker should compute the average.
+        track_type: If the tracker should compute the raw, average or
+        differential value.
         time_interval_size: the time period over which the average should be
-        computed. Only relevant if average is True.
+        computed. Only relevant if track_type is not DeviceValueTracker.raw.
         """
         self.measurement_gen = measurement_gen
         self.measurement_gen.register_tracker(self)
-        self.average = average
-        self.time_interval_size = time_interval_size
+        self.latest_value = 0.0
 
-        if self.average:
-            self.measurement_avg = MeasurementAverage(time_interval_size)
-        else:
-            self.instant_value = 0.0
+        if track_type != DeviceValueTracker.raw:
+            self.measurement_reducer = MeasurementReducer(time_interval_size)
 
 
     def get_value(self):
-        """ Returns the latest value for this tracker (average or not) """
+        """ Returns the latest value for this tracker (reduced or not) """
         latest_value = measurement_gen.get_latest_value()
         if latest_value != None:
-            if self.average:
-                self.measurement_avg.add_measurement(latest_value)
-                return self.measurement_avg.get_average()
-            else:
-                self.instant_value = latest_value
-                return self.instant_value
+            if track_type == DeviceValueTracker.average:
+                self.measurement_reducer.add_measurement(latest_value)
+                self.latest_value = self.measurement_reducer.get_average()
+
+            if track_type == DeviceValueTracker.differential:
+                self.measurement_reducer.add_measurement(latest_value)
+                self.latest_value = self.measurement_reducer.get_differential()
+
+            if track_type == DeviceValueTracker.raw:
+                self.latest_value = latest_value
+
+        return self.instant_value
 
 
 
 class MeasurementGenerator:
     """ An abstract class which does a measurement. """
 
-    def __init__(self):
+    def __init__(self, measurement_param={}):
         self.trackers = dict()
         self.latest_value = 0.0
+        self.measurement_param = measurement_param
 
 
     def register_tracker(self, tracker):
@@ -250,7 +396,7 @@ class MeasurementGenerator:
 
 # Measurement generators -- START
 
-class UptimeGenerator:
+class UptimeGenerator(MeasurementGenerator):
     """
     Computes the number of seconds (floating point precision) of
     the device uptime.
@@ -262,7 +408,7 @@ class UptimeGenerator:
         self.latest_value = time.time() - self.get_boot_time()
 
 
-class LoadAverage1Generator:
+class LoadAverage1Generator(MeasurementGenerator):
     """
     Computes the load average over the last minute.
     Availability: UNIX
@@ -275,7 +421,7 @@ class LoadAverage1Generator:
         self.latest_value = os.getloadavg[0]
 
 
-class LoadAverage5Generator:
+class LoadAverage5Generator(MeasurementGenerator):
     """
     Computes the load average over the last 5 minutes.
     Availability: UNIX
@@ -288,7 +434,7 @@ class LoadAverage5Generator:
         self.latest_value = os.getloadavg[1]
 
 
-class LoadAverage15Generator:
+class LoadAverage15Generator(MeasurementGenerator):
     """
     Computes the load average over the last 15 minutes.
     Availability: UNIX
@@ -301,7 +447,7 @@ class LoadAverage15Generator:
         self.latest_value = os.getloadavg[2]
 
 
-class RamAvailableGenerator:
+class RamAvailableGenerator(MeasurementGenerator):
     """
     Computes the available RAM size in bytes.
     Availability: Windows, UNIX
@@ -312,7 +458,18 @@ class RamAvailableGenerator:
         self.latest_value = psutil.avail_phymem()
 
 
-class SwapAvailableGenerator:
+class RamUsedGenerator(MeasurementGenerator):
+    """
+    Computes the used RAM size in bytes.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        self.latest_value = psutil.used_phymem()
+
+
+class SwapAvailableGenerator(MeasurementGenerator):
     """
     Computes the available SWAP size in bytes.
     Availability: Windows, UNIX
@@ -323,7 +480,18 @@ class SwapAvailableGenerator:
         self.latest_value = psutil.avail_virtmem()
 
 
-class SwapTotalGenerator:
+class SwapUsedGenerator(MeasurementGenerator):
+    """
+    Computes the used swap size in bytes.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        self.latest_value = psutil.used_virtmem()
+
+
+class SwapTotalGenerator(MeasurementGenerator):
     """
     Computes the total SWAP size in bytes.
     Availability: Windows, UNIX
@@ -334,7 +502,7 @@ class SwapTotalGenerator:
         self.latest_value = total_virtmem()
 
 
-class OpenPortsGenerator:
+class OpenPortsGenerator(MeasurementGenerator):
     """
     Computes the number of open UDP and TCP ports on the host.
     Warning: Requires super-user access rights.
@@ -359,7 +527,7 @@ class OpenPortsGenerator:
         self.latest_value = port_count
 
 
-class HostnameChangedGenerator:
+class HostnameChangedGenerator(MeasurementGenerator):
     """
     Computes if the hostname was changed or not. The measure() method sets
     self.latest_value to True if the hostname was changed. False otherwise.
@@ -381,17 +549,318 @@ class HostnameChangedGenerator:
         self.latest_value = True
 
 
+class NetworkTrafficGenerator(MeasurementGenerator):
+    """ Abstract class for generators which work with network traffic """
+
+    def __init__(self)
+        MeasurementGenerator.__init__(self)
+        if LINUX:
+            self.network_traffic = LinuxNetworkTraffic.get_instance()
+        if WINDOWS:
+            self.network_traffic = WindowsNetworkTraffic.get_instance()
+        self.network_traffic = None
+
+
+class NetworkReceivedBytesGenerator(NetworkTrafficGenerator):
+    """
+    Computes the received network bytes.
+    Availability: Windows, Linux
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if network_traffic != None:
+            self.latest_value = self.network_traffic.get_received_bytes()
+
+
+class NetworkSentBytesGenerator(NetworkTrafficGenerator):
+    """
+    Computes the sent network bytes.
+    Availability: Windows, Linux
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if network_traffic != None:
+            self.latest_value = self.network_traffic.get_sent_bytes()
+
+
+class NetworkTotalBytesGenerator(NetworkTrafficGenerator):
+    """
+    Computes the sum of send and received network bytes.
+    Availability: Windows, Linux
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if network_traffic != None:
+            self.latest_value = self.network_traffic.get_sent_bytes() + \
+                    self.network_traffic.get_received_bytes()
+
+
+class NetworkReceivedPacketsGenerator(NetworkTrafficGenerator):
+    """
+    Computes the number of received packets.
+    Availability: Windows, Linux
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if network_traffic != None:
+            self.latest_value = self.network_traffic.get_received_packets()
+
+
+class NetworkSentPacketsGenerator(NetworkTrafficGenerator):
+    """
+    Computes the number of sent packets.
+    Availability: Windows, Linux
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if network_traffic != None:
+            self.latest_value = self.network_traffic.get_sent_packets()
+
+
+class NetworkTotalPacketsGenerator(NetworkTrafficGenerator):
+    """
+    Computes the sum of received and sent packets.
+    Availability: Windows, Linux
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if network_traffic != None:
+            self.latest_value = self.network_traffic.get_sent_packets() +\
+                    self.network_traffic.get_received_packets()
+
+
+class NetworkTrafficPerSecGenerator(NetworkTrafficGenerator):
+    """ Abstract class for counting per second traffic values """
+
+    def __init__(self):
+        NetworkTrafficGenerator.__init__(self)
+        self.reducer = MeasurementReducer(1.0)
+
+    def get_measured_traffic_value(self):
+        # Must be implemented
+        pass
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if network_traffic != None:
+            temp = self.get_measured_traffic_value()
+            self.reducer.add_measurement(temp)
+            self.latest_value = self.reducer.get_differential()
+
+
+class NetworkReceivedBpsGenerator(NetworkTrafficPerSecGenerator):
+    """
+    Computes the number of received bytes over the last second from the
+    time measure() is called.
+    Availability: Windows, Linux
+    """
+
+    def get_measured_traffic_value(self):
+        return self.network_traffic.get_received_bytes()
+
+
+class NetworkSentBpsGenerator(NetworkTrafficGenerator):
+    """
+    Computes the number of sent bytes over the last second from the time
+    measure() is called.
+    Availability: Windows, Linux
+    """
+
+    def get_measured_traffic_value(self):
+        return self.network_trafffic.get_sent_bytes()
+
+
+class NetworkTotalBpsGenerator(NetworkTrafficGenerator):
+    """
+    Computes the sum between the sent and received bytes over the last second
+    from the time measure() is called.
+    Availability: Windows, Linux
+    """
+
+    def get_measured_traffic_value(self):
+        return self.network_traffic.get_sent_bytes() +\
+                self.network_traffic.get_total_bytes()
+
+
+class RamPercentGenerator(MeasurementGenerator):
+    """
+    Computes the percent of how much the RAM is used.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        self.latest_value = float(psutil.used_phymem())/psutil.TOTAL_PHYMEM
+
+
+class CpuPercentGenerator(MeasurementGenerator):
+    """
+    Computes the percent of how much the CPU is used.
+    Availability: Windows, UNIX
+    """
+
+    def __init__(self):
+        MeasurementGenerator.__init__(self)
+        # First is measured with a 0.1 interval (according to psutil doc)
+        self.latest_value = psutil.cpu_percent()
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        # Measuring with 0.0 interval, since we have over 0.1 seconds
+        # between consecutive calls to cpu_percent()
+        self.latest_value = psutil.cpu_percent(interval=0.0)
+
+
+class PartitionAvailableGenerator(MeasurementGenerator):
+    """
+    Computes the total available number of bytes on the given list of partitions.
+    For UNIX, the partition is given with it's mount point. For Windows, it's
+    given by it's drive letter followed by a ':'.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if 'partitions' not in self.measurement_param.keys():
+            return
+        if WINDOWS:
+            self.measure_windows()
+        if UNIX:
+            self.measure_unix()
+
+    def measure_unix():
+        avail_size = 0
+        try:
+            for partition in self.measurement_param['partitions']:
+                stat = os.statvfs(partition)
+                avail_size += stat.f_frsize * stat.f_bavail
+        except:
+            pass
+        self.latest_value = avail_size
+
+    def measure_windows():
+        avail_size = 0
+        for partition in self.measurement_param['partitions']:
+            sizes = win32api.GetDiskFreeSpace(partition)
+            avail_size += sizes[0] * sizes[1] * sizes[2]
+        self.latest_value = avail_size
+
+
+class PartitionPercentGenerator(MeasurementGenerator):
+    """
+    Measures the percent of free space in the given partition list.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        if 'partitions' not in self.measurement_param.keys():
+            return
+        if UNIX:
+            self.measure_unix()
+        if WINDOWS:
+            self.measure_windows()
+
+    def measure_unix(self):
+        avail_size = 0
+        total_size = 0
+        for partition in self.measurement_param['partitions']:
+            stat = os.statvfs(partition)
+            avail_size += stat.f_bavail * stat.f_frsize
+            total_size += stat.f_blocks * stat.f_frsize
+        self.latest_value = float(avail_size)/total_size
+
+    def measure_windows(self):
+        avail_size = 0
+        total_size = 0
+        for partition in self.measurement_param['partitions']:
+            sizes = win32api.GetDiskFreeSpace(partition)
+            avail_size += sizes[0] * sizes[1] * sizes[2]
+            total_size += sizes[0] * sizes[1] * sizes[3]
+        self.latest_value = float(avail_size)/total_size
+
+
+
+class ProcessInfoGenerator(MeasurementGenerator):
+    """
+    Generates information about the current processes.
+    Availability: Windows, UNIX
+    """
+
+    def measure(self):
+        MeasurementGenerator.measure(self)
+        stdout_backup = sys.stdout
+        sys.stdout = StringIO()
+        psutil.test()
+        process_info = sys.stdout.getvalue()
+        sys.stdout = stdout_backup
+
+        process_info_lines = process_info.split('\n')
+        process_info_header = process_info[0]
+        process_info_data = process_info_lines[1:]
+
+        # If we should keep only results from a list of users
+        if 'users' in self.measurement_param.keys():
+            users_list = self.measurement_param['users']
+            new_pinfo_list = []
+            for line in process_info_data:
+                line_list = line.split()
+                if line_list[0] in users_list:
+                    new_pinfo_list.append(line)
+            process_info_data = new_pinfo_list
+
+        # If we should sort the data
+        if 'sort_by' in self.measurement_param.keys():
+            sort_criteria = self.measurement_param['sort_by']
+            if 'sort_order' in self.measurement_param.keys() or\
+                    self.measurement_param['sort_order'] == 'desc':
+                sort_reversed = True
+            else
+                sort_reversed = False
+            if sort_criteria == 'cpu':
+                process_info_data.sort(ProcessInfoGenerator.sort_cpu,\
+                        reverse=sort_reversed)
+            if sort_criteria == 'ram':
+                process_info_data.sort(ProcessInfoGenerator.sort_ram,\
+                        reverse=sort_reversed)
+
+        # If we should keep only a part of the results
+        if 'proc_no' in self.measurement_param.keys():
+            proc_no = int(self.measurement_param['proc_no'])
+            process_info_data = process_info_data[0:proc_no]
+
+        # Format the data
+        self.latest_value = self.process_info_header + '\n'
+        for line in self.process_info_data:
+            self.latest_value += line + '\n'
+
+
+    @staticmethod
+    def sort_cpu(line1, line2):
+        return float(line1[2]) - float(line2[2])
+
+
+    @staticmethod
+    def sort_ram(line1, line2):
+        return float(line1[3]) - float(line2[3])
+
+
 # Measurement generators -- END
 
 
-
-class MeasurementAverage:
+class MeasurementReducer:
     """
-    Class optimised to compute the average of a measurement over a predefined
-    period of time (which is given at construction). It holds an internal
-    queue of the measurements so if the period of the time is bigger, so the
-    size of the queue will grow.
-    The expected average computation time is constant.
+    Class optimised to compute the average/differential of a measurement
+    over a predefined period of time (which is given at construction).
+    It holds an internal queue of the measurements so if the period of the
+    time is bigger, so the size of the queue will grow.
+    The expected reducing computation time is constant.
     The measurement must be an int or a float.
     """
 
@@ -400,12 +869,12 @@ class MeasurementAverage:
     def __init__(self, time_interval_size):
         """
         time_interval_size: A float representing the number of seconds for
-        which the average of the measurements should be computed. It must
-        be at least MeasurementAverage.min_time_interval_size.
+        which the reducing of the measurements should be computed. It must
+        be at least MeasurementReducer.min_time_interval_size.
         """
-        if self.time_interval_size < MeasurementAverage.min_time_interval_size:
+        if self.time_interval_size < MeasurementReducer.min_time_interval_size:
             raise TimeIntervalSizeTooLow(time_interval_size,\
-                    MeasurementAverage.min_time_interval_size)
+                    MeasurementReducer.min_time_interval_size)
 
         self.queue = deque()
         self.measurements_sum = 0.0
@@ -435,8 +904,9 @@ class MeasurementAverage:
         # This can't empty the queue because of the minimum time interval size
         # requirement.
         while self.queue[0][1] + self.time_interval_size > current_time:
-            self.popleft()
+            deleted_measurement = self.queue.popleft()
             self.size -= 1
+            self.measurement_sum -= deleted_measurement[0]
 
 
     def get_average(self):
@@ -445,6 +915,141 @@ class MeasurementAverage:
         size at construction.
         """
         return self.measurement_sum/self.size
+
+
+    def get_differential(self):
+        """
+        Returns the difference between the first and last value in the queue.
+        """
+        queue_len = len(self.queue)
+        if queue_len == 0:
+            return 0.0
+        return self.queue[queue_len - 1][0] - self.queue[0][0]
+
+
+
+class NetworkTraffic(Thread):
+    """ Abstract class used to get network traffic info """
+
+    # Singletone object
+    instance = None
+
+    def __init__(self):
+        """ Shouldn't be used directly. Use get_instance() """
+        self.traffic_lock = Lock()
+
+
+    def init_counters(self):
+        self.received_bytes = 0
+        self.sent_bytes = 0
+        self.received_packets = 0
+        self.sent_packets = 0
+
+
+    @staticmethod
+    def get_instance():
+        """ Returns the only instance of the NetworkTraffic class """
+        if instance == None:
+            instance = NetworkTraffic()
+            instance.start()
+        return instance
+
+
+    def get_received_bytes(self):
+        self.traffic_lock.acquire()
+        temp = self.received_bytes
+        self.traffic_lock.release()
+        return temp
+
+
+    def get_sent_bytes(self):
+        self.traffic_lock.acquire()
+        temp = self.sent_bytes
+        self.traffic_lock.release()
+        return temp
+
+
+    def get_received_packets(self):
+        self.traffic_lock.acquire()
+        temp = self.received_packets
+        self.traffic_lock.release()
+        return temp
+
+
+    def get_sent_packets(self):
+        self.traffic_lock.acquire()
+        temp = self.sent_packets
+        self.traffic_lock.release()
+        return temp
+
+
+
+class LinuxNetworkTraffic(NetworkTraffic):
+
+    # Time between reading the information in seconds
+    sleep_time = 0.2
+
+    def run(self):
+        while True:
+            try:
+                self.measure_traffic()
+            except:
+                pass
+            time.sleep(LinuxNetworkTraffic.sleep_time)
+
+
+    def measure_traffic(self):
+        try:
+            traffic_file = open('/proc/net/dev')
+        except:
+            return
+        traffic_file_lines = traffic_file.readlines()
+
+        self.traffic_lock.acquire()
+        self.init_counters()
+
+        # Ignoring first 2 lines
+        for line in traffic_file_lines[2:]:
+            line_info = line.split()
+
+            try:
+                self.received_bytes += int(line_info[1])
+                self.received_packets += int(line_info[2])
+                self.sent_bytes += int(line_info[9])
+                self.sent_pakcets += int(line_info[10])
+            except:
+                self.traffic_lock.release()
+                self.init_counters()
+                return
+
+        self.traffic_lock.release()
+
+
+
+class WindowsNetworkTraffic(NetworkTraffic):
+
+    def run(self):
+        pythoncom.CoInitialize()
+        _wmi = wmi.WMI()
+
+        while True:
+            recv_b_temp = 0
+            sent_b_temp = 0
+            recv_p_temp = 0
+            sent_p_temp = 0
+            interfaces = _wmi.Win32_PerfRawData_Tcpip_NetworkInterface()
+            for interface in interfaces:
+                recv_b_temp += int(interface.BytesReceivedPerSec)
+                sent_b_temp += int(interface.BytesSentPerSec)
+                recv_p_temp += int(interface.PacketsReceivedPerSec)
+                sent_p_temp += int(interface.PacketsSentPerSec)
+
+            self.traffic_lock.acquire()
+            self.received_bytes = recv_b_temp
+            self.sent_bytes = sent_b_temp
+            self.received_packets = recv_p_temp
+            self.sent_packets = sent_p_temp
+        pythoncom.CoUnitialize()
 
 
 
@@ -457,3 +1062,11 @@ class TimeIntervalSizeTooLow(Exception):
     def __str__(self):
         return repr(self.err_msg)
 
+
+class InvalidVariableName(Exception):
+
+    def __init__(self, var_name):
+        self.err_msg = 'Variable %s doesn\'t exist' % str(var_name)
+
+    def __str__(self):
+        return repr(self.err_msg)
