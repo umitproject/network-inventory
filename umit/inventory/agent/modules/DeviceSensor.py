@@ -19,6 +19,7 @@
 import os
 import sys
 import time
+import datetime
 import psutil
 from cStringIO import StringIO
 from socket import gethostname
@@ -67,6 +68,10 @@ class DeviceSensor(MonitoringModule):
         self.notification_cond_file =\
                 str(self.options[DeviceSensor.notification_cond_file])
 
+        self.measurement_manager = MeasurementManager()
+
+        param = {'users' : ['root'], 'sort_by' : 'cpu', 'proc_no' : 10, 'sort_order': 'desc'}
+        self._id = self.measurement_manager.add_variable('process_info', param)
 
     def get_name(self):
         return 'DeviceSensor'
@@ -76,20 +81,27 @@ class DeviceSensor(MonitoringModule):
         report_time_count = 0.0
 
         while True:
+            pre_measure_time = time.time()
             self.measure()
 
             # Count if we should send the report
-            report_time_count += self.test_time
             if report_time_count >= self.report_time:
+                print self.measurement_manager.get_variable(self._id)
                 report_time_count = 0.0
                 self.report()
 
-            time.sleep(self.test_time)
+            # Making sure we aren't waiting useless time
+            polling_step_time = time.time() - pre_measure_time
+            if polling_step_time > self.test_time:
+                continue
+
+            time.sleep(self.test_time - polling_step_time)
+            report_time_count += time.time() - pre_measure_time
 
 
     def init_default_settings(self):
         self.options[DeviceSensor.test_time] = '0.1'
-        self.options[DeviceSensor.report_time] = '300'
+        self.options[DeviceSensor.report_time] = '5'
         self.options[DeviceSensor.report_template_file] =\
                 os.path.join('umit', 'inventory', 'agent', 'modules',\
                 'device_sensor_report_template.txt')
@@ -100,7 +112,7 @@ class DeviceSensor(MonitoringModule):
 
     def measure(self):
         """ Called each self.test_time seconds to measure device info """
-        pass
+        self.measurement_manager.update()
 
 
     def report(self):
@@ -172,7 +184,7 @@ class MeasurementManager:
         self.const_measurements = {\
                 'boot_time' : self.get_boot_time,\
                 'boot_time_data' : self.get_boot_time_date,\
-                'ram_total' : self.get_ram_total\,
+                'ram_total' : self.get_ram_total,\
                 'hostname' : self.get_hostname\
                 }
 
@@ -193,9 +205,9 @@ class MeasurementManager:
                 'net_recv_bps' : NetworkReceivedBpsGenerator(),\
                 'net_sent_bps' : NetworkSentBpsGenerator(),\
                 'net_total_bps' : NetworkTotalBpsGenerator(),\
-                'net_pack_recv' : NetworkPacketsReceivedGenerator(),\
-                'net_pack_sent' : NetworkPacketsSentGenerator(),\
-                'net_pack_total' : NetworkPacketsTotalGenerator(),\
+                'net_pack_recv' : NetworkReceivedPacketsGenerator(),\
+                'net_pack_sent' : NetworkSentPacketsGenerator(),\
+                'net_pack_total' : NetworkTotalPacketsGenerator(),\
                 'ram_percent' : RamPercentGenerator(),\
                 'cpu_percent' : CpuPercentGenerator()\
                 }
@@ -218,84 +230,88 @@ class MeasurementManager:
         self.measured_variables_last_id = 0
 
 
-        def add_variable(self, var_name, var_param=None):
-            """
-            Adds a measurement for a device variable. Raises an
-            InvalidVariableName exception if var_name isn't found.
-            var_name: The name of the variable to be measured.
-            var_param: If the variable is configurable, the parameters to
-            configure it. This is a dictionary - 'param_name' : param_value.
+    def add_variable(self, var_name, var_param=None):
+        """
+        Adds a measurement for a device variable. Raises an
+        InvalidVariableName exception if var_name isn't found.
+        var_name: The name of the variable to be measured.
+        var_param: If the variable is configurable, the parameters to
+        configure it. This is a dictionary - 'param_name' : param_value.
 
-            Returns: The ID for this measurement.
-            """
-            # Since is constant, the ID doesn't really matter
-            if var_name in self.const_measurements.keys():
-                return var_name
+        Returns: The ID for this measurement.
+        """
+        # Since is constant, the ID doesn't really matter
+        if var_name in self.const_measurements.keys():
+            return var_name
 
-            # The variable is already measured, returning it's name
-            if var_name in self.measured_variables.keys():
-                return var_name
+        # The variable is already measured, returning it's name
+        if var_name in self.measured_variables.keys():
+            return var_name
 
-            # The variable isn't measured. Checking if it's non-configurable.
-            if var_name in self.measurement_objects.keys():
-                self.measured_variables[var_name] =\
-                        self.measurement_objects[var_name]
-                return var_name
+        # The variable isn't measured. Checking if it's non-configurable.
+        if var_name in self.measurement_objects.keys():
+            self.measured_variables[var_name] =\
+                    self.measurement_objects[var_name]
+            return var_name
 
-            # If it's a configurable variable
-            if var_name in self.conf_measurement_classes.keys():
-                # Check if this configurable variable is already measured
-                conf_measure_id = var_name + '::' + str(var_param)
-                if conf_var_id in self.conf_measurement_ids.keys():
-                    return self.conf_variables_ids[conf_var_id]
+        # If it's a configurable variable
+        if var_name in self.conf_measurement_classes.keys():
+            # Check if this configurable variable is already measured
+            conf_measure_id = var_name + '::' + str(var_param)
+            if conf_measure_id in self.conf_measurement_ids.keys():
+                return self.conf_measurement_ids[conf_var_id]
 
-                self.measured_variables_last_id += 1
-                new_id = str(self.measured_variables_last_id)
-                self.measured_variables[new_id] =\
-                        self.conf_measurement_classes[var_name](var_param)
-                self.conf_measurement_ids[conf_measure_id] = new_id
-                return new_id
+            self.measured_variables_last_id += 1
+            new_id = str(self.measured_variables_last_id)
+            self.measured_variables[new_id] =\
+                    self.conf_measurement_classes[var_name](var_param)
+            self.conf_measurement_ids[conf_measure_id] = new_id
+            return new_id
 
-            raise InvalidVariableName(var_name)
-
-
-        def update(self):
-            """ Updates the variables with new measurements if required."""
-            for measurement_gen in self.measured_values.values():
-                self.measurement_gen.measure()
+        raise InvalidVariableName(var_name)
 
 
-        def get_variable(self, var_id):
-            """
-            Returns the latest value of a variable.
-            var_id: The id of the variable, which is the variable name for the
-            non-configurable variables and the value returned by
-            add_configurable_variable() for configurable variables.
-            """
-            if var_id in self.const_measurements.keys():
-                return self.const_measurements[var_id]()
-
-            if var_id in self.measured_variables.keys():
-                return self.measured_variables[var_id].get_lastest_value()
-
-            raise InvalidVariableName(var_id)
+    def update(self):
+        """ Updates the variables with new measurements if required."""
+        for measurement_gen in self.measured_variables.values():
+            measurement_gen.measure()
 
 
-        def get_boot_time(self):
-            return psutil.BOOT_TIME
+    def get_variable(self, var_id):
+        """
+        Returns the latest value of a variable.
+        var_id: The id of the variable, which is the variable name for the
+        non-configurable variables and the value returned by
+        add_configurable_variable() for configurable variables.
+        """
+        if var_id in self.const_measurements.keys():
+            return self.const_measurements[var_id]()
+
+        if var_id in self.measured_variables.keys():
+            return self.measured_variables[var_id].get_latest_value()
+
+        raise InvalidVariableName(var_id)
 
 
-        def get_boot_time_data(self):
-            boot_time_struct = time.gmtime(psutil.BOOT_TIME)
-            return time.asctime(boot_time_struct)
+    @staticmethod
+    def get_boot_time():
+        return psutil.BOOT_TIME
 
 
-        def get_ram_total(self):
-            return psutil.TOTAL_PHYMEM
+    @staticmethod
+    def get_boot_time_date():
+        boot_time_struct = time.gmtime(psutil.BOOT_TIME)
+        return time.asctime(boot_time_struct)
 
 
-        def get_hostname(self):
-            return gethostname()
+    @staticmethod
+    def get_ram_total():
+        return psutil.TOTAL_PHYMEM
+
+
+    @staticmethod
+    def get_hostname():
+        return gethostname()
 
 
 
@@ -388,7 +404,7 @@ class MeasurementGenerator:
         if tracker not in self.trackers.keys():
             return self.latest_value
 
-        if self.trackers[tracker]
+        if self.trackers[tracker]:
             return None
         return self.latest_value
 
@@ -552,13 +568,14 @@ class HostnameChangedGenerator(MeasurementGenerator):
 class NetworkTrafficGenerator(MeasurementGenerator):
     """ Abstract class for generators which work with network traffic """
 
-    def __init__(self)
+    def __init__(self):
         MeasurementGenerator.__init__(self)
         if LINUX:
             self.network_traffic = LinuxNetworkTraffic.get_instance()
-        if WINDOWS:
+        elif WIN:
             self.network_traffic = WindowsNetworkTraffic.get_instance()
-        self.network_traffic = None
+        else:
+            self.network_traffic = None
 
 
 class NetworkReceivedBytesGenerator(NetworkTrafficGenerator):
@@ -648,7 +665,7 @@ class NetworkTrafficPerSecGenerator(NetworkTrafficGenerator):
 
     def measure(self):
         MeasurementGenerator.measure(self)
-        if network_traffic != None:
+        if self.network_traffic != None:
             temp = self.get_measured_traffic_value()
             self.reducer.add_measurement(temp)
             self.latest_value = self.reducer.get_differential()
@@ -729,7 +746,7 @@ class PartitionAvailableGenerator(MeasurementGenerator):
         MeasurementGenerator.measure(self)
         if 'partitions' not in self.measurement_param.keys():
             return
-        if WINDOWS:
+        if WIN:
             self.measure_windows()
         if UNIX:
             self.measure_unix()
@@ -764,7 +781,7 @@ class PartitionPercentGenerator(MeasurementGenerator):
             return
         if UNIX:
             self.measure_unix()
-        if WINDOWS:
+        if WIN:
             self.measure_windows()
 
     def measure_unix(self):
@@ -793,27 +810,97 @@ class ProcessInfoGenerator(MeasurementGenerator):
     Availability: Windows, UNIX
     """
 
-    def measure(self):
-        MeasurementGenerator.measure(self)
-        stdout_backup = sys.stdout
-        sys.stdout = StringIO()
-        psutil.test()
-        process_info = sys.stdout.getvalue()
-        sys.stdout = stdout_backup
+    def __init__(self, var_param):
+        MeasurementGenerator.__init__(self, var_param)
+        self.template = "%-9s %-5s %-4s %4s %7s %7s %5s %7s  %s"
+        self.header = self.template % ("USER", "PID", "%CPU", "%MEM",\
+                "VSZ", "RSS", "START", "TIME", "COMMAND")
+        pid_list = psutil.get_pid_list()
+        self.processes = {}
+        for pid in pid_list:
+            self.processes[pid] = psutil.Process(pid)
+            self.processes[pid].get_cpu_percent(interval=0)
 
-        process_info_lines = process_info.split('\n')
-        process_info_header = process_info[0]
-        process_info_data = process_info_lines[1:]
+
+    def get_latest_value(self):
+        self.measure(True)
+        return self.latest_value
+
+
+    def measure(self, full_measure=False):
+        # full_measure is used to do the parsing only when requesting the value
+        # since this MeasurementGenerator shouldn't be used for comparations.
+        MeasurementGenerator.measure(self)
+
+        # Find out new processes pid's
+        current_pid_list = psutil.get_pid_list()
+        old_pid_list = self.processes.keys()
+        new_pid_list = [x for x in current_pid_list if not x in old_pid_list]
+
+        # Delete dead processes
+        for pid in old_pid_list:
+            if pid not in current_pid_list:
+                del self.processes[pid]
+
+        for pid in new_pid_list:
+            self.processes[pid] = psutil.Process(pid)
+            # So the next measurements will be accurate
+            self.processes[pid].get_cpu_percent(interval=0)
+
+        if not full_measure:
+            return
+
+        processes_list = []
+        today_day = datetime.date.today()
+        for proc in self.processes.values():
+            try:
+                process_info = []
+                user = proc.username
+                if WIN and '\\' in user:
+                    user = user.split('\\')[1]
+                pid = proc.pid
+                cpu = round(proc.get_cpu_percent(interval=0), 1)
+                mem = round(proc.get_memory_percent(), 1)
+                rss, vsz = [x/1024 for x in proc.get_memory_info()]
+
+                start = datetime.datetime.fromtimestamp(proc.create_time)
+                if start.date() == today_day:
+                    start = start.strftime('%H:%M')
+                else:
+                    start = start.strftime('%b%d')
+
+                cputime = time.strftime('%M:%S',\
+                        time.localtime(sum(proc.get_cpu_times())))
+
+                cmd = ' '.join(proc.cmdline)
+                if not cmd:
+                    cmd = '[%s]' % proc.name
+
+                # Using a list instead of a dict here since this operation needs
+                # to be finished fast.
+                process_info.append(user)
+                process_info.append(pid)
+                process_info.append(cpu)
+                process_info.append(mem)
+                process_info.append(vsz)
+                process_info.append(rss)
+                process_info.append(start)
+                process_info.append(cputime)
+                process_info.append(cmd)
+                processes_list.append(process_info)
+            except:
+                # The process died before we got to it in this loop
+                del self.processes[proc.pid]
+                pass
 
         # If we should keep only results from a list of users
         if 'users' in self.measurement_param.keys():
             users_list = self.measurement_param['users']
-            new_pinfo_list = []
-            for line in process_info_data:
-                line_list = line.split()
-                if line_list[0] in users_list:
-                    new_pinfo_list.append(line)
-            process_info_data = new_pinfo_list
+            new_process_list = []
+            for proc in processes_list:
+                if proc[0] in users_list:
+                    new_process_list.append(proc)
+            processes_list = new_process_list
 
         # If we should sort the data
         if 'sort_by' in self.measurement_param.keys():
@@ -821,35 +908,45 @@ class ProcessInfoGenerator(MeasurementGenerator):
             if 'sort_order' in self.measurement_param.keys() or\
                     self.measurement_param['sort_order'] == 'desc':
                 sort_reversed = True
-            else
+            else:
                 sort_reversed = False
             if sort_criteria == 'cpu':
-                process_info_data.sort(ProcessInfoGenerator.sort_cpu,\
+                processes_list.sort(ProcessInfoGenerator.sort_cpu,\
                         reverse=sort_reversed)
             if sort_criteria == 'ram':
-                process_info_data.sort(ProcessInfoGenerator.sort_ram,\
+                processes_list.sort(ProcessInfoGenerator.sort_ram,\
                         reverse=sort_reversed)
 
         # If we should keep only a part of the results
         if 'proc_no' in self.measurement_param.keys():
             proc_no = int(self.measurement_param['proc_no'])
-            process_info_data = process_info_data[0:proc_no]
+            processes_list = processes_list[0:proc_no]
 
         # Format the data
-        self.latest_value = self.process_info_header + '\n'
-        for line in self.process_info_data:
+        self.latest_value = self.header + '\n'
+        for proc in processes_list:
+            line = self.template % tuple(proc)
             self.latest_value += line + '\n'
 
 
     @staticmethod
-    def sort_cpu(line1, line2):
-        return float(line1[2]) - float(line2[2])
+    def sort_cpu(proc1, proc2):
+        diff = proc1[2] - proc2[2]
+        if diff < 0:
+            return -1
+        if diff > 0:
+            return 1
+        return 0
 
 
     @staticmethod
-    def sort_ram(line1, line2):
-        return float(line1[3]) - float(line2[3])
-
+    def sort_ram(proc1, proc2):
+        diff = proc1[3] - proc2[3]
+        if diff < 0:
+            return -1
+        if diff > 0:
+            return 1
+        return 0
 
 # Measurement generators -- END
 
@@ -872,7 +969,7 @@ class MeasurementReducer:
         which the reducing of the measurements should be computed. It must
         be at least MeasurementReducer.min_time_interval_size.
         """
-        if self.time_interval_size < MeasurementReducer.min_time_interval_size:
+        if time_interval_size < MeasurementReducer.min_time_interval_size:
             raise TimeIntervalSizeTooLow(time_interval_size,\
                     MeasurementReducer.min_time_interval_size)
 
@@ -881,7 +978,7 @@ class MeasurementReducer:
         self.first_timestamp = 0.0
         self.last_timestamp = 0.0
         self.size = 0
-        self.time_interval_size
+        self.time_interval_size = time_interval_size
 
 
     def add_measurement(self, measurement):
@@ -898,15 +995,16 @@ class MeasurementReducer:
         self.queue.append((measurement, current_time))
 
         self.size += 1
-        self.measurement_sum += float(measurement)
+        self.measurements_sum += float(measurement)
 
         # Deleting measurements which are too old for this time interval
         # This can't empty the queue because of the minimum time interval size
         # requirement.
-        while self.queue[0][1] + self.time_interval_size > current_time:
+        while self.size > 0 and \
+                self.queue[0][1] + self.time_interval_size < current_time:
             deleted_measurement = self.queue.popleft()
             self.size -= 1
-            self.measurement_sum -= deleted_measurement[0]
+            self.measurements_sum -= deleted_measurement[0]
 
 
     def get_average(self):
@@ -914,7 +1012,9 @@ class MeasurementReducer:
         Returns the average of the measurements over the given time interval
         size at construction.
         """
-        return self.measurement_sum/self.size
+        if self.size == 0:
+            return 0.0
+        return self.measurements_sum/self.size
 
 
     def get_differential(self):
@@ -924,7 +1024,8 @@ class MeasurementReducer:
         queue_len = len(self.queue)
         if queue_len == 0:
             return 0.0
-        return self.queue[queue_len - 1][0] - self.queue[0][0]
+        return (self.queue[queue_len - 1][0] - self.queue[0][0])/\
+                self.time_interval_size
 
 
 
@@ -936,7 +1037,9 @@ class NetworkTraffic(Thread):
 
     def __init__(self):
         """ Shouldn't be used directly. Use get_instance() """
+        Thread.__init__(self)
         self.traffic_lock = Lock()
+        self.init_counters()
 
 
     def init_counters(self):
@@ -944,15 +1047,6 @@ class NetworkTraffic(Thread):
         self.sent_bytes = 0
         self.received_packets = 0
         self.sent_packets = 0
-
-
-    @staticmethod
-    def get_instance():
-        """ Returns the only instance of the NetworkTraffic class """
-        if instance == None:
-            instance = NetworkTraffic()
-            instance.start()
-        return instance
 
 
     def get_received_bytes(self):
@@ -983,11 +1077,22 @@ class NetworkTraffic(Thread):
         return temp
 
 
+    def run(self):
+        pass
+
 
 class LinuxNetworkTraffic(NetworkTraffic):
 
     # Time between reading the information in seconds
     sleep_time = 0.2
+
+    @staticmethod
+    def get_instance():
+        if NetworkTraffic.instance == None:
+            NetworkTraffic.instance = LinuxNetworkTraffic()
+            NetworkTraffic.instance.start()
+        return NetworkTraffic.instance
+
 
     def run(self):
         while True:
@@ -1016,7 +1121,7 @@ class LinuxNetworkTraffic(NetworkTraffic):
                 self.received_bytes += int(line_info[1])
                 self.received_packets += int(line_info[2])
                 self.sent_bytes += int(line_info[9])
-                self.sent_pakcets += int(line_info[10])
+                self.sent_packets += int(line_info[10])
             except:
                 self.traffic_lock.release()
                 self.init_counters()
@@ -1027,6 +1132,14 @@ class LinuxNetworkTraffic(NetworkTraffic):
 
 
 class WindowsNetworkTraffic(NetworkTraffic):
+
+    @staticmethod
+    def get_instance():
+        if NetworkTraffic.instance == None:
+            NetworkTraffic.instance = WindowsNetworkTraffic()
+            NetworkTraffic.instance.start()
+        return NetworkTraffic.instance
+
 
     def run(self):
         pythoncom.CoInitialize()
