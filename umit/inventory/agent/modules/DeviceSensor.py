@@ -19,6 +19,7 @@
 import os
 import sys
 import time
+import string
 import datetime
 import json
 import re
@@ -80,10 +81,10 @@ class DeviceSensor(MonitoringModule):
                 str(self.options[DeviceSensor.notification_cond_file])
 
         self.measurement_manager = MeasurementManager()
-        self.trackers_manager = TrackersManager(self.notification_cond_file)
+        self.trackers_manager = TrackersManager(self.notification_cond_file, self)
+        self.trackers_manager.parse_report_file(self.report_template_file,\
+                self.report_time)
 
-        param = {'users' : ['root'], 'sort_by' : 'cpu', 'proc_no' : 10, 'sort_order': 'desc'}
-        self._id = self.measurement_manager.add_variable('process_info', param)
 
     def get_name(self):
         return 'DeviceSensor'
@@ -93,26 +94,17 @@ class DeviceSensor(MonitoringModule):
         report_time_count = 0.0
 
         while True:
-            pre_measure_time = time.time()
-            self.measure()
-
-            # Count if we should send the report
-            if report_time_count >= self.report_time:
-                print self.measurement_manager.get_variable(self._id)
-                report_time_count = 0.0
-                self.report()
-
-            # Making sure we aren't waiting useless time
-            polling_step_time = time.time() - pre_measure_time
-            if polling_step_time > self.test_time:
+            pre_update_time = time.time()
+            self.update()
+            post_update_time = time.time()
+            diff_time = post_update_time - pre_update_time
+            if diff_time >= self.test_time:
                 continue
-
-            time.sleep(self.test_time - polling_step_time)
-            report_time_count += time.time() - pre_measure_time
+            time.sleep(self.test_time - diff_time)
 
 
     def init_default_settings(self):
-        self.options[DeviceSensor.test_time] = '0.1'
+        self.options[DeviceSensor.test_time] = '0.25'
         self.options[DeviceSensor.report_time] = '5'
         self.options[DeviceSensor.report_template_file] =\
                 os.path.join('umit', 'inventory', 'agent', 'modules',\
@@ -122,9 +114,10 @@ class DeviceSensor(MonitoringModule):
                 'device_sensor_notification_cond.txt')
 
 
-    def measure(self):
+    def update(self):
         """ Called each self.test_time seconds to measure device info """
         self.measurement_manager.update()
+        self.trackers_manager.update()
 
 
     def report(self):
@@ -327,7 +320,7 @@ class MeasurementManager:
 
 
 
-class TrackerDefinitionFields
+class TrackerDefinitionFields:
     """
     The fields which are found in the tracker definitions file for a given
     tracker.
@@ -356,18 +349,24 @@ class TrackersManager:
     def __init__(self, trackers_file, device_sensor):
         self.device_sensor = device_sensor
         self.measurement_manager = device_sensor.measurement_manager
-        self._parse_conditions(trackers_file)
         self.trackers = []
+        self._parse_conditions(trackers_file)
 
         # Add measurements for variables we will send in the
         self.measurement_manager.add_measurement(DeviceSensor.uptime)
         self.measurement_manager.add_measurement(DeviceSensor.cpu_percent)
         self.measurement_manager.add_measurement(DeviceSensor.ram_percent)
-        self.measurement_manager.add_measurement(DeviceSensor.net_set_bytes)
+        self.measurement_manager.add_measurement(DeviceSensor.net_sent_bytes)
         self.measurement_manager.add_measurement(DeviceSensor.net_recv_bytes)
 
 
-    def _parse_conditions(self, trackers_file)
+    def update(self):
+        """ Forces all the trackers to check their value """
+        for tracker in self.trackers:
+            tracker.check_value()
+
+
+    def _parse_conditions(self, trackers_file):
         # Parses the conditions defined in the trackers file and starts
         # the trackers
         try:
@@ -391,8 +390,37 @@ class TrackersManager:
             # TODO log this
             pass
 
+    def parse_report_file(self, report_file, report_cooldown):
+        """ Parses the report file template and adds a special tracker """
+        try:
+            f = open(report_file)
+        except:
+            # TODO log this
+            return
+        report_template = f.read()
+        tracker_def = dict()
 
-    def _tracker_from_definition(self, tracker_def):
+        tracker_def[TrackerDefinitionFields.var_name] = None
+        tracker_def[TrackerDefinitionFields.var_param] = None
+        # Next 2 definitions are to force the ramp-up
+        tracker_def[TrackerDefinitionFields.mode] = 'average'
+        tracker_def[TrackerDefinitionFields.reducing_time] = report_cooldown
+        tracker_def[TrackerDefinitionFields.threshold] = None
+        tracker_def[TrackerDefinitionFields.threshold_comp] = None
+        tracker_def[TrackerDefinitionFields.cooldown] = report_cooldown
+        tracker_def[TrackerDefinitionFields.notif_msg] = report_template
+        tracker_def[TrackerDefinitionFields.notif_type] =\
+                NotificationTypes.info
+
+        try:
+            tracker = self._tracker_from_definition(tracker_def, True)
+            self.trackers.append(tracker)
+        except:
+            # TODO log this
+            pass
+
+
+    def _tracker_from_definition(self, tracker_def, report_tracker=False):
         keys = tracker_def.keys()
 
         # Grab the fields in the definition
@@ -422,17 +450,25 @@ class TrackersManager:
         threshold_comp = tracker_def[TrackerDefinitionFields.threshold_comp]
 
         threshold = self.multiply_with_modifier(threshold)
-        if threshold == None:
+        if threshold == None and not report_tracker:
             return None
         notif_msg, notif_vars, notif_vars_modifiers =\
                 self.parse_message_template(notif_msg)
 
-        var_id = self.measurement_manager.add_measurement(var_name, var_param)
+        if not report_tracker:
+            var_id = self.measurement_manager.add_measurement(var_name,\
+                    var_param)
+        else:
+            var_id = None
 
-        return DeviceValueTracker(self.measurement_manager, var_id, threshold,\
+        # Special case in each we want a ReportTracker
+        if report_tracker:
+            tracker_class = ReportTracker
+        else:
+            tracker_class = DeviceValueTracker
+        return tracker_class(self.measurement_manager, var_id, threshold,\
                 threshold_comp, notif_msg, notif_type, notif_vars,\
                 notif_vars_modifiers, self, cooldown, mode, reducing_time)
-
 
 
     def parse_message_template(self, notif_msg):
@@ -443,6 +479,7 @@ class TrackersManager:
         var_re = re.compile('\$\([^$(]*\)')
         variables = var_re.findall(notif_msg)
         for var in variables:
+            var = var.strip('$()')
             var_elements = var.split()
             var_name = var_elements[0]
             var_param = {}
@@ -456,15 +493,21 @@ class TrackersManager:
                 except:
                     pass
                 var_param[var_param_left] = var_param_right
-            # Add a measurement for each variable found here. 'threshold' and
-            # 'value' are special cases which belong to the tracker.
-            notif_vars.append(var_name)
+
             if 'modifier' in var_param.keys():
                 modifier = self.get_modifier(var_param['modifier'])
                 notif_vars_modifiers.append(modifier)
             else:
                 notif_vars_modifiers.append(None)
+
+            # Add a measurement for each variable found here. 'threshold' and
+            # 'value' are special cases which belong to the tracker.
+            if var_name == 'threshold' or var_name == 'value':
+                notif_vars.append(var_name)
+                continue
+            print str(var_name) + str(var_param)
             vid = self.measurement_manager.add_measurement(var_name, var_param)
+            notif_vars.append(vid)
 
         # Replace the variables with the %s string
         variables_iter = var_re.finditer(notif_msg)
@@ -481,7 +524,11 @@ class TrackersManager:
 
 
     @staticmethod
-    def mutiply_with_modifier(threshold):
+    def multiply_with_modifier(threshold):
+        if type(threshold) == float or type(threshold) == int:
+            return threshold
+        if type(threshold) != str:
+            return None
         threshold = threshold.strip()
         l = len(threshold)
         modifier = TrackersManager.get_modifier(threshold)
@@ -491,9 +538,10 @@ class TrackersManager:
 
 
     @staticmethod
-    def get_modifier(threshold):
-        l = len(threshold)
-        modifier = string.lower(threshold[l-2:l])
+    def get_modifier(value):
+        _value = str(value)
+        l = len(_value)
+        modifier = string.lower(_value[l-2:l])
         if modifier == 'kb':
             return 2**10
         if modifier == 'mb':
@@ -532,9 +580,9 @@ class DeviceValueTracker:
     """
 
     # Tracking types
-    raw = 0
-    average = 1
-    differential = 2
+    raw = 'raw'
+    average = 'average'
+    differential = 'differential'
 
     # Threshold compare mode
     greater = 'gt'
@@ -544,9 +592,9 @@ class DeviceValueTracker:
     less = 'less'
 
 
-    def __init__(self, measure_manager, varid, treshold, comp_mode, notif_msg,\
+    def __init__(self, measure_manager, varid, threshold, comp_mode, notif_msg,\
             notif_type, notif_vars, notif_vars_modifiers, tracker_manager,\
-            cooldown=300.0, track_type=0, time_interval_size=1.0):
+            cooldown=300.0, track_type='raw', time_interval_size=1.0):
         """
         measure_manager: A MeasurementManager object.
         varid: The variable id of the variable we are tracking.
@@ -569,7 +617,8 @@ class DeviceValueTracker:
         time_interval_size: If the track_type is average or differential,
         then the time interval to compute them.
         """
-        self.measurerement_manager = measure_manager
+        self.tracker_manager = tracker_manager
+        self.measurement_manager = measure_manager
         self.var_id = varid
         self.latest_value = None
         self.cooldown = cooldown
@@ -582,18 +631,38 @@ class DeviceValueTracker:
         self.notif_vars = notif_vars
         self.notif_vars_modifiers = notif_vars_modifiers
         self.track_type = track_type
+        self.start_up_time = time.time()
+        self.ramp_up_done = False
+        self.time_interval_size = time_interval_size
 
-        if track_type != DeviceValueTracker.raw:
+        if track_type == DeviceValueTracker.differential or\
+                track_type == DeviceValueTracker.average:
             self.measurement_reducer = MeasurementReducer(time_interval_size)
 
 
-        def check_value(self):
-        """ Checks that the value is under the given limits """
-        # If we are cooling down, we shouldn't send a notification
+    def check_ramp_up(self):
+        if self.ramp_up_done or self.track_type == DeviceValueTracker.raw:
+            return True
+        if self.track_type == DeviceValueTracker.differential or\
+                self.track_type == DeviceValueTracker.average:
+            current_time = time.time()
+            if self.start_up_time + self.time_interval_size < current_time:
+                self.ramp_up_done = True
+
+
+    def check_cooldown(self):
         if self.cooling_down == True:
             crt_time = time.time()
             if crt_time < self.cooling_down_end:
-                return
+                return False
+        return True
+
+
+    def check_value(self):
+        """ Checks that the value is under the given limits """
+        # If we are cooling down, we shouldn't send a notification
+        if not self.check_cooldown():
+            return
 
         # Compute the latest value
         self.latest_value = self.measurement_manager.get_variable(self.var_id)
@@ -603,6 +672,11 @@ class DeviceValueTracker:
         if self.track_type == DeviceValueTracker.differential:
             self.measurement_reducer.add_measurement(self.latest_value)
             self.latest_value = self.measurement_reducer.get_differential()
+
+        # Make sure we don't give alerts too early when the average or
+        # differential isn't yet computed with enough elements
+        if not self.check_ramp_up():
+            return
 
         # Check the current value and start cooling down if we should send a
         # notification.
@@ -647,7 +721,6 @@ class DeviceValueTracker:
                 # TODO maybe log this
                 return
             notif_msg_variables.append(str(var_value))
-
         notif_msg_variables = map(self._apply_modifiers,\
                 notif_msg_variables, self.notif_vars_modifiers)
         try:
@@ -655,7 +728,7 @@ class DeviceValueTracker:
         except:
             return
 
-        self.tracker_manager.alert(computed_notif_msg, notif_type)
+        self.tracker_manager.alert(computed_notif_msg, self.notif_type)
 
 
     def _apply_modifiers(self, var_value, var_modifier):
@@ -665,6 +738,21 @@ class DeviceValueTracker:
                 or var_modifier == 0:
             return var_value
         return var_value/var_modifier
+
+
+
+class ReportTracker(DeviceValueTracker):
+    """ Class used to send a report each self.cooldown seconds """
+
+    def check_value(self):
+        print 'checking report tracker'
+        if not self.check_cooldown():
+            return
+
+        if not self.check_ramp_up():
+            return
+
+        self.alert()
 
 
 
@@ -696,7 +784,7 @@ class UptimeGenerator(MeasurementGenerator):
     """
 
     def measure(self):
-        self.latest_value = time.time() - self.get_boot_time()
+        self.latest_value = time.time() - psutil.BOOT_TIME
 
 
 class LoadAverage1Generator(MeasurementGenerator):
@@ -849,7 +937,7 @@ class NetworkReceivedBytesGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if network_traffic != None:
+        if self.network_traffic != None:
             self.latest_value = self.network_traffic.get_received_bytes()
 
 
@@ -860,7 +948,7 @@ class NetworkSentBytesGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if network_traffic != None:
+        if self.network_traffic != None:
             self.latest_value = self.network_traffic.get_sent_bytes()
 
 
@@ -871,7 +959,7 @@ class NetworkTotalBytesGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if network_traffic != None:
+        if self.network_traffic != None:
             self.latest_value = self.network_traffic.get_sent_bytes() + \
                     self.network_traffic.get_received_bytes()
 
@@ -883,7 +971,7 @@ class NetworkReceivedPacketsGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if network_traffic != None:
+        if self.network_traffic != None:
             self.latest_value = self.network_traffic.get_received_packets()
 
 
@@ -894,7 +982,7 @@ class NetworkSentPacketsGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if network_traffic != None:
+        if self.network_traffic != None:
             self.latest_value = self.network_traffic.get_sent_packets()
 
 
@@ -905,7 +993,7 @@ class NetworkTotalPacketsGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if network_traffic != None:
+        if self.network_traffic != None:
             self.latest_value = self.network_traffic.get_sent_packets() +\
                     self.network_traffic.get_received_packets()
 
@@ -980,13 +1068,12 @@ class CpuPercentGenerator(MeasurementGenerator):
 
     def __init__(self):
         MeasurementGenerator.__init__(self)
-        # First is measured with a 0.1 interval (according to psutil doc)
-        self.latest_value = psutil.cpu_percent()
+        self.cpu_percent = CpuPercent()
+        self.cpu_percent.start()
+        self.latest_value = self.cpu_percent.get_value()
 
     def measure(self):
-        # Measuring with 0.0 interval, since we have over 0.1 seconds
-        # between consecutive calls to cpu_percent()
-        self.latest_value = psutil.cpu_percent(interval=0.0)
+        self.latest_value = self.cpu_percent.get_value()
 
 
 class PartitionAvailableGenerator(MeasurementGenerator):
@@ -1095,9 +1182,17 @@ class ProcessInfoGenerator(MeasurementGenerator):
                 del self.processes[pid]
 
         for pid in new_pid_list:
-            self.processes[pid] = psutil.Process(pid)
-            # So the next measurements will be accurate
-            self.processes[pid].get_cpu_percent(interval=0)
+            try:
+                self.processes[pid] = psutil.Process(pid)
+                # So the next measurements will be accurate
+                self.processes[pid].get_cpu_percent(interval=0)
+            except:
+                # If we get here, the process was terminated in the last
+                # instructions
+                try:
+                    del self.processes[pid]
+                except:
+                    pass
 
         if not full_measure:
             return
@@ -1416,6 +1511,38 @@ class WindowsNetworkTraffic(NetworkTraffic):
             self.sent_packets = sent_p_temp
             self.traffic_lock.release()
         pythoncom.CoUnitialize()
+
+
+
+class CpuPercent(Thread):
+    """
+    Class to measure the cpu%.
+    This is needed because succesive calls to psutil.cpu_percent() with
+    interval set to None won't give accurate results (in the current psutil
+    release).
+
+    Calling with interval=0.2 will make the thread sleep for 0.2 seconds.
+    """
+
+    def __init__(self):
+        Thread.__init__(self)
+        self.cpu_percent = psutil.cpu_percent(interval=0.5)
+        self.cpu_percent_lock = Lock()
+
+
+    def run(self):
+        while True:
+            temp = psutil.cpu_percent(interval=0.2)
+            self.cpu_percent_lock.acquire()
+            self.cpu_percent = temp
+            self.cpu_percent_lock.release()
+
+
+    def get_value(self):
+        self.cpu_percent_lock.acquire()
+        temp = self.cpu_percent
+        self.cpu_percent_lock.release()
+        return temp/100.0
 
 
 

@@ -1,0 +1,15 @@
+Hostname: $(hostname). Uptime: $(uptime)s
+
+CPU%%: $(cpu_percent). RAM%%: $(ram_percent)
+
+Most intensive CPU processes:
+$(process_info sort_by=cpu sort_order=desc proc_no=5)
+
+Most intensive RAM processes:
+$(process_info sort_by=ram sort_order=desc proc_no=5)
+
+Total Received Packets: $(net_pack_recv)
+Total Sent Packets:     $(net_pack_sent)
+
+Current received KBytes per sec: $(net_recv_bps modifier=kb) kbps
+Current sent KBytes per sec:     $(net_sent_bps modifier=kb) kbps

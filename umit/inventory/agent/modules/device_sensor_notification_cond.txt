@@ -7,6 +7,6 @@
         "threshold" : 0.8,
         "threshold_comp" : "gt",
         "notif_type" : "WARNING",
-        "notif_msg" : "Hostname: $(hostname). Uptime: $(uptime).\n\n CPU% is over $(threshold). Current Value: $(value).\n\nMost intensive CPU processes running:\n$(process_info sort_by=cpu sort_order=desc proc_no=10)"
+        "notif_msg" : "Hostname: $(hostname). Uptime: $(uptime).\n\n CPU%% is over $(threshold). Current Value: $(value).\n\nMost intensive CPU processes running:\n$(process_info sort_by=cpu sort_order=desc proc_no=10)"
     }
 ]
