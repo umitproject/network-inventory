@@ -18,19 +18,19 @@
 
 import threading
 import socket
-import sys
-import os
+import traceback
 
 from umit.inventory.agent.Configs import AgentConfig
 from umit.inventory.common import CorruptInventoryModule
+from umit.inventory import common
 
 
 class AgentMainLoop:
 
-    def __init__(self, message_parser):
+    def __init__(self, message_parser, configurations):
         """
         @message_parser: A parser which must implement the parse(message)
-        method. It dependens on implementation, but most likely, it will send
+        method. It depends on implementation, but most likely, it will send
         the message trough UDP to the Notifications Server.
         """
 
@@ -44,6 +44,8 @@ class AgentMainLoop:
         self.main_loop_cond_var = threading.Condition()
         self.received_messages = False
         self.message_parser = message_parser
+        self.modules = []
+        self.conf = configurations
 
 
     def _parse_messages(self):
@@ -77,21 +79,70 @@ class AgentMainLoop:
         self.main_loop_cond_var condition variable. It will wait until there
         are messages to be parsed
         """
-        while True:
-            self.added_message_queue_lock.acquire()
-            if self.received_messages:
-                self.parsing_message_queue = self.added_message_queue
-                self.added_message_queue = []
-                self.received_messages = False
-                self.added_message_queue_lock.release()
+        try:
+            # Load up the modules
+            # TODO log this
+            modules_names = self.conf.get_modules_list()
+            for module_name in modules_names:
+                if not self.conf.module_get_enable(module_name):
+                    continue
+                try:
+                    module_path = self.conf.module_get_option(module_name,\
+                            AgentConfig.module_path)
+                    module_obj = common.load_module(module_name,\
+                            module_path, self.conf, self)
 
-                self._parse_messages()
+                    # Do a sanity check to test the module is correct
+                    try:
+                        module_name = module_obj.get_name()
+                    except:
+                        raise CorruptAgentModule(module_name, module_path,\
+                                CorruptAgentModule.get_name)
+                    if module_name != module_obj.get_name():
+                        raise CorruptAgentModule(module_name, module_path,\
+                                CorruptAgentModule.get_name)
+        
+                except Exception, e:
+                    traceback.print_exc()
+                    continue
 
-            else:
-                self.main_loop_cond_var.acquire()
-                self.added_message_queue_lock.release()
-                self.main_loop_cond_var.wait()
+                self.modules.append(module_obj)
+
+            # Start up the modules
+            for module in self.modules:
+                module.start()
+
+            # The actual main loop
+            while True:
+                self.added_message_queue_lock.acquire()
+                if self.received_messages:
+                    self.parsing_message_queue = self.added_message_queue
+                    self.added_message_queue = []
+                    self.received_messages = False
+                    self.added_message_queue_lock.release()
+
+                    self._parse_messages()
+
+                else:
+                    self.main_loop_cond_var.acquire()
+                    self.added_message_queue_lock.release()
+                    self.main_loop_cond_var.wait()
+                    self.main_loop_cond_var.release()
+        except KeyboardInterrupt:
+            # Release the locks
+            try:
                 self.main_loop_cond_var.release()
+            except:
+                pass
+            try:
+                self.added_message_queue_lock.release()
+            except:
+                pass
+
+            for module in self.modules:
+                module.shutdown()
+                module.join()
+            return
 
 
 
@@ -105,7 +156,7 @@ class AgentNotificationParser:
         """
         self.server_addr = configs.get_general_option(AgentConfig.server_addr)
         self.server_port = configs.get_general_option(AgentConfig.server_port)
-        self.server_port = int(self.server_port);
+        self.server_port = int(self.server_port)
         self.encrypt_enabled =\
                 configs.get_general_option(AgentConfig.encrypt_enabled)
 
@@ -141,6 +192,6 @@ class CorruptAgentModule(CorruptInventoryModule):
     def __init__(self, module_name, module_path, err_type=0):
         CorruptInventoryModule.__init__(self, module_name,\
                 module_path, err_type)
-        if err_type == get_name:
+        if err_type == CorruptAgentModule.get_name:
             self.err_description = module_name + 'doesn\'t implement' +\
                     'the get_name() or it\'s return value is incorrect'

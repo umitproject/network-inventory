@@ -20,8 +20,8 @@ from random import random
 from random import choice
 import string
 import time
+import threading
 
-from umit.inventory.agent import Core
 from umit.inventory.agent.MonitoringModule import MonitoringModule
 from umit.inventory.common import NotificationTypes
 
@@ -43,6 +43,10 @@ class TestModule(MonitoringModule):
         self.message_size = int(self.options[TestModule.message_size])
         self.fields_num = int(self.options[TestModule.fields_num])
         self.fields_length = int(self.options[TestModule.fields_length])
+
+        # Shutdown bool value and lock for it's access
+        self.should_shutdown = False
+        self.shutdown_lock = threading.Lock()
 
 
     def get_name(self):
@@ -88,11 +92,21 @@ class TestModule(MonitoringModule):
     def run(self):
 
         while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+
             msg = self._generate_random_message()
             msg_type = self._generate_random_type()
             fields = self._generate_random_fields()
-
             self.send_message(msg, msg_type, fields)
+
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
 
 
     def init_default_settings(self):

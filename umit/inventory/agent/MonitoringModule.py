@@ -71,6 +71,11 @@ class MonitoringModule(Thread):
         raise MonitoringModule.NotImplemented('run')
 
 
+    def shutdown(self):
+        """ Called when the module must shututdown. Must be implemented """
+        raise MonitoringModule.NotImplemented('shutdown')
+    
+
     def init_default_settings(self):
         """
         Sets in the self.options dictionary the default settings for this

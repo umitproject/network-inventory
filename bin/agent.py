@@ -41,8 +41,9 @@ def main(args):
     parser = Core.AgentNotificationParser(conf)
 
     # The event-based main loop of the Agent.
-    agent_main_loop = Core.AgentMainLoop(parser)
+    agent_main_loop = Core.AgentMainLoop(parser, conf)
 
+    """
     # Initialize the monitoring modules
     modules_names = conf.get_modules_list()
     modules = []
@@ -71,10 +72,13 @@ def main(args):
 
         modules.append(module_obj)
 
+    # Set the modules for the agent main loop
+    agent_main_loop.modules = modules
+
     # Start the monitoring modules
     for module in modules:
         module.start()
-
+    """
     # Start the main loop
     agent_main_loop.run()
 

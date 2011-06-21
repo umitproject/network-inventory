@@ -85,15 +85,25 @@ class DeviceSensor(MonitoringModule):
         self.trackers_manager.parse_report_file(self.report_template_file,\
                 self.report_time)
 
+        # Shutdown bool value and associated lock
+        self.should_shutdown = False
+        self.shutdown_lock = Lock()
+
 
     def get_name(self):
         return 'DeviceSensor'
 
 
     def run(self):
-        report_time_count = 0.0
 
         while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.measurement_manager.shutdown()
+                self.shutdown_lock.release()
+                break;
+            self.shutdown_lock.release()
+            
             pre_update_time = time.time()
             self.update()
             post_update_time = time.time()
@@ -120,12 +130,10 @@ class DeviceSensor(MonitoringModule):
         self.trackers_manager.update()
 
 
-    def report(self):
-        """
-        Called when the Device Sensor should send a report (as specified)
-        with device information.
-        """
-        pass
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
 
 
 
@@ -264,7 +272,7 @@ class MeasurementManager:
             # Check if this configurable variable is already measured
             conf_measure_id = var_name + '::' + str(var_param)
             if conf_measure_id in self.conf_measurement_ids.keys():
-                return self.conf_measurement_ids[conf_var_id]
+                return self.conf_measurement_ids[conf_measure_id]
 
             self.measured_variables_last_id += 1
             new_id = str(self.measured_variables_last_id)
@@ -281,6 +289,15 @@ class MeasurementManager:
         for measurement_gen in self.measured_variables.values():
             measurement_gen.measure()
 
+
+    def shutdown(self):
+        """
+        Called when the monitoring modules should shutdown (if they are
+        in a separate thread).
+        """
+        for monitor_mode_key in self.measured_variables.keys():
+            self.measured_variables[monitor_mode_key].shutdown()
+            
 
     def get_variable(self, var_id):
         """
@@ -384,7 +401,7 @@ class TrackersManager:
         try:
             for tracker_definition in file_trackers_list:
                 tracker = self._tracker_from_definition(tracker_definition)
-                if tracker != None:
+                if tracker is not None:
                     self.trackers.append(tracker)
         except:
             # TODO log this
@@ -450,7 +467,7 @@ class TrackersManager:
         threshold_comp = tracker_def[TrackerDefinitionFields.threshold_comp]
 
         threshold = self.multiply_with_modifier(threshold)
-        if threshold == None and not report_tracker:
+        if threshold is None and not report_tracker:
             return None
         notif_msg, notif_vars, notif_vars_modifiers =\
                 self.parse_message_template(notif_msg)
@@ -532,7 +549,7 @@ class TrackersManager:
         threshold = threshold.strip()
         l = len(threshold)
         modifier = TrackersManager.get_modifier(threshold)
-        if modifier != None:
+        if modifier is not None:
             return float(threshold[:l-2] * modifier)
         return float(threshold)
 
@@ -651,7 +668,7 @@ class DeviceValueTracker:
 
 
     def check_cooldown(self):
-        if self.cooling_down == True:
+        if self.cooling_down:
             crt_time = time.time()
             if crt_time < self.cooling_down_end:
                 return False
@@ -732,7 +749,7 @@ class DeviceValueTracker:
 
 
     def _apply_modifiers(self, var_value, var_modifier):
-        if var_modifier == None:
+        if var_modifier is None:
             return var_value
         if type(var_modifier) != int or type(var_modifier) != float\
                 or var_modifier == 0:
@@ -772,6 +789,12 @@ class MeasurementGenerator:
     def measure(self):
         """ Does the actual measuring. Should be implemented. """
         pass
+
+
+    def shutdown(self):
+        """ When we should shutdown if it's in a separate thread """
+        pass
+
 
 
 # Measurement generators -- START
@@ -870,7 +893,7 @@ class SwapTotalGenerator(MeasurementGenerator):
     """
 
     def measure(self):
-        self.latest_value = total_virtmem()
+        self.latest_value = psutil.total_virtmem()
 
 
 class OpenPortsGenerator(MeasurementGenerator):
@@ -929,6 +952,10 @@ class NetworkTrafficGenerator(MeasurementGenerator):
         else:
             self.network_traffic = None
 
+    def shutdown(self):
+        if self.network_traffic is not None:
+            self.network_traffic.shutdown()
+            
 
 class NetworkReceivedBytesGenerator(NetworkTrafficGenerator):
     """
@@ -937,7 +964,7 @@ class NetworkReceivedBytesGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if self.network_traffic != None:
+        if self.network_traffic is not None:
             self.latest_value = self.network_traffic.get_received_bytes()
 
 
@@ -948,7 +975,7 @@ class NetworkSentBytesGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if self.network_traffic != None:
+        if self.network_traffic is not None:
             self.latest_value = self.network_traffic.get_sent_bytes()
 
 
@@ -959,7 +986,7 @@ class NetworkTotalBytesGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if self.network_traffic != None:
+        if self.network_traffic is not None:
             self.latest_value = self.network_traffic.get_sent_bytes() + \
                     self.network_traffic.get_received_bytes()
 
@@ -971,7 +998,7 @@ class NetworkReceivedPacketsGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if self.network_traffic != None:
+        if self.network_traffic is not None:
             self.latest_value = self.network_traffic.get_received_packets()
 
 
@@ -982,7 +1009,7 @@ class NetworkSentPacketsGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if self.network_traffic != None:
+        if self.network_traffic is not None:
             self.latest_value = self.network_traffic.get_sent_packets()
 
 
@@ -993,7 +1020,7 @@ class NetworkTotalPacketsGenerator(NetworkTrafficGenerator):
     """
 
     def measure(self):
-        if self.network_traffic != None:
+        if self.network_traffic is not None:
             self.latest_value = self.network_traffic.get_sent_packets() +\
                     self.network_traffic.get_received_packets()
 
@@ -1010,7 +1037,7 @@ class NetworkTrafficPerSecGenerator(NetworkTrafficGenerator):
         pass
 
     def measure(self):
-        if self.network_traffic != None:
+        if self.network_traffic is not None:
             temp = self.get_measured_traffic_value()
             self.reducer.add_measurement(temp)
             self.latest_value = self.reducer.get_differential()
@@ -1035,7 +1062,7 @@ class NetworkSentBpsGenerator(NetworkTrafficGenerator):
     """
 
     def get_measured_traffic_value(self):
-        return self.network_trafffic.get_sent_bytes()
+        return self.network_traffic.get_sent_bytes()
 
 
 class NetworkTotalBpsGenerator(NetworkTrafficGenerator):
@@ -1075,6 +1102,9 @@ class CpuPercentGenerator(MeasurementGenerator):
     def measure(self):
         self.latest_value = self.cpu_percent.get_value()
 
+    def shutdown(self):
+        self.cpu_percent.shutdown()
+
 
 class PartitionAvailableGenerator(MeasurementGenerator):
     """
@@ -1092,7 +1122,7 @@ class PartitionAvailableGenerator(MeasurementGenerator):
         if UNIX:
             self.measure_unix()
 
-    def measure_unix():
+    def measure_unix(self):
         avail_size = 0
         try:
             for partition in self.measurement_param['partitions']:
@@ -1102,7 +1132,7 @@ class PartitionAvailableGenerator(MeasurementGenerator):
             pass
         self.latest_value = avail_size
 
-    def measure_windows():
+    def measure_windows(self):
         avail_size = 0
         for partition in self.measurement_param['partitions']:
             sizes = win32api.GetDiskFreeSpace(partition)
@@ -1388,6 +1418,10 @@ class NetworkTraffic(Thread):
         self.traffic_lock = Lock()
         self.init_counters()
 
+        # Shutdown bool value and lock
+        self.should_shutdown = False
+        self.shutdown_lock = Lock()
+
 
     def init_counters(self):
         self.received_bytes = 0
@@ -1428,6 +1462,13 @@ class NetworkTraffic(Thread):
         pass
 
 
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
+
+        
+
 class LinuxNetworkTraffic(NetworkTraffic):
 
     # Time between reading the information in seconds
@@ -1435,7 +1476,7 @@ class LinuxNetworkTraffic(NetworkTraffic):
 
     @staticmethod
     def get_instance():
-        if NetworkTraffic.instance == None:
+        if NetworkTraffic.instance is None:
             NetworkTraffic.instance = LinuxNetworkTraffic()
             NetworkTraffic.instance.start()
         return NetworkTraffic.instance
@@ -1443,6 +1484,12 @@ class LinuxNetworkTraffic(NetworkTraffic):
 
     def run(self):
         while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+            
             try:
                 self.measure_traffic()
             except:
@@ -1482,7 +1529,7 @@ class WindowsNetworkTraffic(NetworkTraffic):
 
     @staticmethod
     def get_instance():
-        if NetworkTraffic.instance == None:
+        if NetworkTraffic.instance is None:
             NetworkTraffic.instance = WindowsNetworkTraffic()
             NetworkTraffic.instance.start()
         return NetworkTraffic.instance
@@ -1493,6 +1540,12 @@ class WindowsNetworkTraffic(NetworkTraffic):
         _wmi = wmi.WMI()
 
         while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+            
             recv_b_temp = 0
             sent_b_temp = 0
             recv_p_temp = 0
@@ -1510,7 +1563,7 @@ class WindowsNetworkTraffic(NetworkTraffic):
             self.received_packets = recv_p_temp
             self.sent_packets = sent_p_temp
             self.traffic_lock.release()
-        pythoncom.CoUnitialize()
+        pythoncom.CoUninitialize()
 
 
 
@@ -1529,9 +1582,18 @@ class CpuPercent(Thread):
         self.cpu_percent = psutil.cpu_percent(interval=0.5)
         self.cpu_percent_lock = Lock()
 
+        self.should_shutdown = False
+        self.shutdown_lock = Lock()
+
 
     def run(self):
         while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+            
             temp = psutil.cpu_percent(interval=0.2)
             self.cpu_percent_lock.acquire()
             self.cpu_percent = temp
@@ -1545,7 +1607,13 @@ class CpuPercent(Thread):
         return temp/100.0
 
 
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
 
+
+        
 class TimeIntervalSizeTooLow(Exception):
 
     def __init__(self, time_interval, time_interval_min):
