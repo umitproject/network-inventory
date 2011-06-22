@@ -17,28 +17,24 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 
-from umit.inventory.server.Core import ServerShell
 from umit.inventory.server.Module import ListenerServerModule
 from umit.inventory.server.Module import ServerModule
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 from umit.inventory.common import NotificationTypes
-import umit.inventory.server.Notification
 
 from twisted.internet import reactor
-from twisted.internet.protocol import ServerFactory
 from twisted.internet.protocol import DatagramProtocol
 
 from pysnmp.proto import api
 from pysnmp.proto.mpmod.rfc3412 import SNMPv3Message, ScopedPDU
-from pyasn1.codec.ber import decoder, encoder
+from pyasn1.codec.ber import decoder
 import pyasn1.type.univ
 from pysnmp.proto.secmod.rfc3414 import auth, priv, localkey
 
 import traceback
 from copy import copy
 import time
-import string
 
 
 class SNMPListener(ListenerServerModule, ServerModule):
@@ -258,7 +254,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
 
         # If the host which emited it isn't remote, then the source address
         # is the one mentioned in the IP packet.
-        if source_host == None:
+        if source_host is None:
             source_host = host
 
         # TODO delete this
@@ -399,7 +395,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
             return SNMPUtils.snmpv3_md5_auth
         if auth_mode == SNMPv3User.hmac_sha_auth:
             return SNMPUtils.snmpv3_sha_auth
-        return SNMPUtils.no_auth
+        return SNMPUtils.snmpv3_no_auth
 
 
     def get_v3_auth_key(self, user_name, engine_id):
@@ -583,10 +579,10 @@ class SNMPv1NotificationFields(NotificationFields):
     types = copy(NotificationFields.types)
 
     # Set the names
-    generic_trap_id = 'generic_trap_id'
-    enterprise_trap_id = 'enterprise_trap_id'
-    uptime = 'uptime'
-    enterprise_oid = 'enterprise_oid'
+    generic_trap_id = 'snmp_v1_generic_trap_id'
+    enterprise_trap_id = 'snmp_v1_enterprise_trap_id'
+    uptime = 'snmp_v1_uptime'
+    enterprise_oid = 'snmp_v1_enterprise_oid'
     names.append(generic_trap_id)
     names.append(enterprise_trap_id)
     names.append(uptime)
@@ -627,9 +623,9 @@ class SNMPv2cNotificationFields(NotificationFields):
     types = copy(NotificationFields.types)
 
     # Set the names
-    uptime = 'uptime'
-    trap_oid = 'trap_oid'
-    enterprise_oid = 'enterprise_oid'
+    uptime = 'snmp_v2c_uptime'
+    trap_oid = 'snmp_v2c_trap_oid'
+    enterprise_oid = 'snmp_v2c_enterprise_oid'
     names.append(uptime)
     names.append(trap_oid)
     names.append(enterprise_oid)
@@ -686,10 +682,10 @@ class SNMPv3User:
         * When db_fields is None and the information will be taken from the
         other parameters.
         """
-        if db_fields == None and user_name == None:
+        if db_fields is None and user_name is None:
             raise InvalidSNMPv3User('Invalid initialisation')
 
-        if db_fields != None:
+        if db_fields is not None:
             self._init_from_db(db_fields)
         else:
             self._init_from_param(user_name, auth_mode, priv_mode,\

@@ -18,8 +18,6 @@
 
 import pymongo
 
-from umit.inventory.server.Module import ServerModule
-from umit.inventory.server.Module import SubscriberServerModule
 from umit.inventory.server.Notification import Notification
 
 import traceback

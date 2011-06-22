@@ -16,10 +16,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-import threading
 from threading import Thread
 
-from umit.inventory.agent import Core
 from umit.inventory.common import AgentNotificationParser
 
 
@@ -35,9 +33,10 @@ class MonitoringModule(Thread):
         Thread.__init__(self)
 
         # Initialize the default settings for this module. Will be
-        # overwritten by the next pargraph if they are set in the config file.
+        # overwritten by the next paragraph if they are set in the config file.
         self.options = dict()
         self.init_default_settings()
+        self.daemon = True
 
         # Get the options from the configs and save them
         module_config_options = configs.items(self.get_name())
@@ -61,6 +60,7 @@ class MonitoringModule(Thread):
         msg_type: The type of the message. See umit.inventory.common
         fields: A dictionary with the module specific fields.
         """
+        print "sending a message ..."
         notification = AgentNotificationParser.parse(message, msg_type,\
                 fields, self.get_name())
         self.agent_main_loop.add_message(notification)
@@ -69,11 +69,6 @@ class MonitoringModule(Thread):
     def run(self):
         """The Monitoring module main loop. Must be implemented."""
         raise MonitoringModule.NotImplemented('run')
-
-
-    def shutdown(self):
-        """ Called when the module must shututdown. Must be implemented """
-        raise MonitoringModule.NotImplemented('shutdown')
     
 
     def init_default_settings(self):

@@ -49,8 +49,8 @@ class NetworkAdministratorSender(ServerModule, SubscriberServerModule):
         self.dispatcher = NotificationQueueDispatcher(self.host, self.username,\
                 self.password, self.max_qsize, self.wait_time)
         self.dispatcher.start()
-        
-        
+
+
     def get_name(self):
         return 'NetworkAdministratorSender'
 
@@ -132,7 +132,7 @@ class NotificationQueueDispatcher(Thread):
         queue may be empty if a notification was added right after we checked
         the time.
         """
-        if len(self.queue) == 0:
+        if len(self.queue) is 0:
             return
 
         conn = httplib.HTTPConnection(self.host)
@@ -150,6 +150,7 @@ class NotificationQueueDispatcher(Thread):
         print response.reason
         print response.msg
         print response.getheaders()
+        print response.read()
         print 'sending %d %f' % (len(self.queue), time.time())
         
         conn.close()

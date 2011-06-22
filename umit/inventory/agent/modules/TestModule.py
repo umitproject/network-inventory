@@ -69,7 +69,7 @@ class TestModule(MonitoringModule):
     def _generate_random_type(self):
         # Currently consider 12.5% chances to generate a CRITICAL notification.
         i = choice(range(8))
-        if i == 0:
+        if i is 0:
             return NotificationTypes.critical
         else:
             return NotificationTypes.info
@@ -92,21 +92,10 @@ class TestModule(MonitoringModule):
     def run(self):
 
         while True:
-            self.shutdown_lock.acquire()
-            if self.should_shutdown:
-                self.shutdown_lock.release()
-                break
-            self.shutdown_lock.release()
-
             msg = self._generate_random_message()
             msg_type = self._generate_random_type()
             fields = self._generate_random_fields()
             self.send_message(msg, msg_type, fields)
-
-    def shutdown(self):
-        self.shutdown_lock.acquire()
-        self.should_shutdown = True
-        self.shutdown_lock.release()
 
 
     def init_default_settings(self):

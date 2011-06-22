@@ -16,11 +16,6 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-from umit.inventory.server.Configs import ServerConfig
-
-from twisted.internet.protocol import ServerFactory
-import twisted.internet.protocol
-
 
 class ServerModule:
     """The interface for a generic ServerModule."""

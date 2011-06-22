@@ -24,13 +24,12 @@ import datetime
 import json
 import re
 import psutil
-from cStringIO import StringIO
+import traceback
 from socket import gethostname
 from collections import deque
 from threading import Thread
 from threading import Lock
 
-from umit.inventory.agent import Core
 from umit.inventory.agent.MonitoringModule import MonitoringModule
 from umit.inventory.common import NotificationTypes
 
@@ -85,10 +84,6 @@ class DeviceSensor(MonitoringModule):
         self.trackers_manager.parse_report_file(self.report_template_file,\
                 self.report_time)
 
-        # Shutdown bool value and associated lock
-        self.should_shutdown = False
-        self.shutdown_lock = Lock()
-
 
     def get_name(self):
         return 'DeviceSensor'
@@ -97,12 +92,6 @@ class DeviceSensor(MonitoringModule):
     def run(self):
 
         while True:
-            self.shutdown_lock.acquire()
-            if self.should_shutdown:
-                self.measurement_manager.shutdown()
-                self.shutdown_lock.release()
-                break;
-            self.shutdown_lock.release()
             
             pre_update_time = time.time()
             self.update()
@@ -128,12 +117,6 @@ class DeviceSensor(MonitoringModule):
         """ Called each self.test_time seconds to measure device info """
         self.measurement_manager.update()
         self.trackers_manager.update()
-
-
-    def shutdown(self):
-        self.shutdown_lock.acquire()
-        self.should_shutdown = True
-        self.shutdown_lock.release()
 
 
 
@@ -271,11 +254,13 @@ class MeasurementManager:
         if var_name in self.conf_measurement_classes.keys():
             # Check if this configurable variable is already measured
             conf_measure_id = var_name + '::' + str(var_param)
+            
             if conf_measure_id in self.conf_measurement_ids.keys():
                 return self.conf_measurement_ids[conf_measure_id]
 
             self.measured_variables_last_id += 1
             new_id = str(self.measured_variables_last_id)
+
             self.measured_variables[new_id] =\
                     self.conf_measurement_classes[var_name](var_param)
             self.conf_measurement_ids[conf_measure_id] = new_id
@@ -288,15 +273,6 @@ class MeasurementManager:
         """ Updates the variables with new measurements if required."""
         for measurement_gen in self.measured_variables.values():
             measurement_gen.measure()
-
-
-    def shutdown(self):
-        """
-        Called when the monitoring modules should shutdown (if they are
-        in a separate thread).
-        """
-        for monitor_mode_key in self.measured_variables.keys():
-            self.measured_variables[monitor_mode_key].shutdown()
             
 
     def get_variable(self, var_id):
@@ -404,6 +380,7 @@ class TrackersManager:
                 if tracker is not None:
                     self.trackers.append(tracker)
         except:
+            traceback.print_exc()
             # TODO log this
             pass
 
@@ -434,6 +411,7 @@ class TrackersManager:
             self.trackers.append(tracker)
         except:
             # TODO log this
+            traceback.print_exc()
             pass
 
 
@@ -469,6 +447,7 @@ class TrackersManager:
         threshold = self.multiply_with_modifier(threshold)
         if threshold is None and not report_tracker:
             return None
+
         notif_msg, notif_vars, notif_vars_modifiers =\
                 self.parse_message_template(notif_msg)
 
@@ -522,8 +501,9 @@ class TrackersManager:
             if var_name == 'threshold' or var_name == 'value':
                 notif_vars.append(var_name)
                 continue
-            print str(var_name) + str(var_param)
+            print var_name
             vid = self.measurement_manager.add_measurement(var_name, var_param)
+            print vid
             notif_vars.append(vid)
 
         # Replace the variables with the %s string
@@ -682,7 +662,12 @@ class DeviceValueTracker:
             return
 
         # Compute the latest value
-        self.latest_value = self.measurement_manager.get_variable(self.var_id)
+        temp_latest_value = self.measurement_manager.get_variable(self.var_id)
+        if temp_latest_value is None:
+            # The Measurement Manager isn't ready to give us the value
+            return
+        self.latest_value = temp_latest_value
+
         if self.track_type == DeviceValueTracker.average:
             self.measurement_reducer.add_measurement(self.latest_value)
             self.latest_value = self.measurement_reducer.get_average()
@@ -734,10 +719,13 @@ class DeviceValueTracker:
                 continue
             try:
                 var_value = self.measurement_manager.get_variable(var)
+                if var_value is None:
+                    var_value = '[Undefined]'
             except:
                 # TODO maybe log this
+                traceback.print_exc()
                 return
-            notif_msg_variables.append(str(var_value))
+            notif_msg_variables.append(var_value)
         notif_msg_variables = map(self._apply_modifiers,\
                 notif_msg_variables, self.notif_vars_modifiers)
         try:
@@ -749,12 +737,14 @@ class DeviceValueTracker:
 
 
     def _apply_modifiers(self, var_value, var_modifier):
+        print '%s has modifier %s' % (str(var_value), str(var_modifier))
         if var_modifier is None:
             return var_value
-        if type(var_modifier) != int or type(var_modifier) != float\
+        if (type(var_value) != int and type(var_value) != float)\
                 or var_modifier == 0:
+            print type(var_value)
             return var_value
-        return var_value/var_modifier
+        return round(float(var_value)/var_modifier, 2)
 
 
 
@@ -762,7 +752,6 @@ class ReportTracker(DeviceValueTracker):
     """ Class used to send a report each self.cooldown seconds """
 
     def check_value(self):
-        print 'checking report tracker'
         if not self.check_cooldown():
             return
 
@@ -770,19 +759,24 @@ class ReportTracker(DeviceValueTracker):
             return
 
         self.alert()
+        self.cooling_down = True
+        self.cooling_down_end = time.time() + self.cooldown
 
 
 
 class MeasurementGenerator:
     """ An abstract class which does a measurement. """
 
-    def __init__(self, measurement_param={}):
-        self.latest_value = 0.0
+    def __init__(self, measurement_param=dict()):
+        self.latest_value = None
         self.measurement_param = measurement_param
 
 
     def get_latest_value(self):
-        """ Returns the latest measured value """
+        """
+        Returns the latest measured value. By convention, if the latest_value
+        is None, the measurement failed or didn't completed.
+        """
         return self.latest_value
 
 
@@ -791,10 +785,14 @@ class MeasurementGenerator:
         pass
 
 
-    def shutdown(self):
-        """ When we should shutdown if it's in a separate thread """
-        pass
-
+    def is_ready(self):
+        """
+        Returns True if the MeasurementGenerator is ready to provide accurate
+        results. This function should be checked each time before calling
+        get_latest_value().
+        Should be overwritten.
+        """
+        return True
 
 
 # Measurement generators -- START
@@ -930,6 +928,7 @@ class HostnameChangedGenerator(MeasurementGenerator):
     def __init__(self):
         MeasurementGenerator.__init__(self)
         self.initial_host_name = gethostname()
+        self.latest_value = False
 
     def measure(self):
         current_host_name = gethostname()
@@ -952,10 +951,6 @@ class NetworkTrafficGenerator(MeasurementGenerator):
         else:
             self.network_traffic = None
 
-    def shutdown(self):
-        if self.network_traffic is not None:
-            self.network_traffic.shutdown()
-            
 
 class NetworkReceivedBytesGenerator(NetworkTrafficGenerator):
     """
@@ -1025,33 +1020,16 @@ class NetworkTotalPacketsGenerator(NetworkTrafficGenerator):
                     self.network_traffic.get_received_packets()
 
 
-class NetworkTrafficPerSecGenerator(NetworkTrafficGenerator):
-    """ Abstract class for counting per second traffic values """
-
-    def __init__(self):
-        NetworkTrafficGenerator.__init__(self)
-        self.reducer = MeasurementReducer(1.0)
-
-    def get_measured_traffic_value(self):
-        # Must be implemented
-        pass
-
-    def measure(self):
-        if self.network_traffic is not None:
-            temp = self.get_measured_traffic_value()
-            self.reducer.add_measurement(temp)
-            self.latest_value = self.reducer.get_differential()
-
-
-class NetworkReceivedBpsGenerator(NetworkTrafficPerSecGenerator):
+class NetworkReceivedBpsGenerator(NetworkTrafficGenerator):
     """
     Computes the number of received bytes over the last second from the
     time measure() is called.
     Availability: Windows, Linux
     """
 
-    def get_measured_traffic_value(self):
-        return self.network_traffic.get_received_bytes()
+    def measure(self):
+        if self.network_traffic is not None:
+            self.latest_value = self.network_traffic.get_received_bps()
 
 
 class NetworkSentBpsGenerator(NetworkTrafficGenerator):
@@ -1061,8 +1039,9 @@ class NetworkSentBpsGenerator(NetworkTrafficGenerator):
     Availability: Windows, Linux
     """
 
-    def get_measured_traffic_value(self):
-        return self.network_traffic.get_sent_bytes()
+    def measure(self):
+        if self.network_traffic is not None:
+            self.latest_value = self.network_traffic.get_sent_bps()
 
 
 class NetworkTotalBpsGenerator(NetworkTrafficGenerator):
@@ -1072,9 +1051,10 @@ class NetworkTotalBpsGenerator(NetworkTrafficGenerator):
     Availability: Windows, Linux
     """
 
-    def get_measured_traffic_value(self):
-        return self.network_traffic.get_sent_bytes() +\
-                self.network_traffic.get_total_bytes()
+    def measure(self):
+        if self.network_traffic is not None:
+            self.latest_value = self.network_traffic.get_sent_bps() +\
+                self.network_traffic.get_received_bps()
 
 
 class RamPercentGenerator(MeasurementGenerator):
@@ -1097,13 +1077,9 @@ class CpuPercentGenerator(MeasurementGenerator):
         MeasurementGenerator.__init__(self)
         self.cpu_percent = CpuPercent()
         self.cpu_percent.start()
-        self.latest_value = self.cpu_percent.get_value()
 
     def measure(self):
         self.latest_value = self.cpu_percent.get_value()
-
-    def shutdown(self):
-        self.cpu_percent.shutdown()
 
 
 class PartitionAvailableGenerator(MeasurementGenerator):
@@ -1185,11 +1161,7 @@ class ProcessInfoGenerator(MeasurementGenerator):
         self.template = "%-9s %-5s %-4s %4s %7s %7s %5s %7s  %s"
         self.header = self.template % ("USER", "PID", "%CPU", "%MEM",\
                 "VSZ", "RSS", "START", "TIME", "COMMAND")
-        pid_list = psutil.get_pid_list()
-        self.processes = {}
-        for pid in pid_list:
-            self.processes[pid] = psutil.Process(pid)
-            self.processes[pid].get_cpu_percent(interval=0)
+        self.processes_info = ProcessesInfo.get_instance()
 
 
     def get_latest_value(self, tracker=None):
@@ -1200,75 +1172,12 @@ class ProcessInfoGenerator(MeasurementGenerator):
     def measure(self, full_measure=False):
         # full_measure is used to do the parsing only when requesting the value
         # since this MeasurementGenerator shouldn't be used for comparations.
-
-        # Find out new processes pid's
-        current_pid_list = psutil.get_pid_list()
-        old_pid_list = self.processes.keys()
-        new_pid_list = [x for x in current_pid_list if not x in old_pid_list]
-
-        # Delete dead processes
-        for pid in old_pid_list:
-            if pid not in current_pid_list:
-                del self.processes[pid]
-
-        for pid in new_pid_list:
-            try:
-                self.processes[pid] = psutil.Process(pid)
-                # So the next measurements will be accurate
-                self.processes[pid].get_cpu_percent(interval=0)
-            except:
-                # If we get here, the process was terminated in the last
-                # instructions
-                try:
-                    del self.processes[pid]
-                except:
-                    pass
-
         if not full_measure:
             return
-
-        processes_list = []
-        today_day = datetime.date.today()
-        for proc in self.processes.values():
-            try:
-                process_info = []
-                user = proc.username
-                if WIN and '\\' in user:
-                    user = user.split('\\')[1]
-                pid = proc.pid
-                cpu = round(proc.get_cpu_percent(interval=0), 1)
-                mem = round(proc.get_memory_percent(), 1)
-                rss, vsz = [x/1024 for x in proc.get_memory_info()]
-
-                start = datetime.datetime.fromtimestamp(proc.create_time)
-                if start.date() == today_day:
-                    start = start.strftime('%H:%M')
-                else:
-                    start = start.strftime('%b%d')
-
-                cputime = time.strftime('%M:%S',\
-                        time.localtime(sum(proc.get_cpu_times())))
-
-                cmd = ' '.join(proc.cmdline)
-                if not cmd:
-                    cmd = '[%s]' % proc.name
-
-                # Using a list instead of a dict here since this operation needs
-                # to be finished fast.
-                process_info.append(user)
-                process_info.append(pid)
-                process_info.append(cpu)
-                process_info.append(mem)
-                process_info.append(vsz)
-                process_info.append(rss)
-                process_info.append(start)
-                process_info.append(cputime)
-                process_info.append(cmd)
-                processes_list.append(process_info)
-            except:
-                # The process died before we got to it in this loop
-                del self.processes[proc.pid]
-                pass
+        processes_list = self.processes_info.get_info()
+        if processes_list is None:
+            self.latest_value = None
+            return
 
         # If we should keep only results from a list of users
         if 'users' in self.measurement_param.keys():
@@ -1389,7 +1298,7 @@ class MeasurementReducer:
         Returns the average of the measurements over the given time interval
         size at construction.
         """
-        if self.size == 0:
+        if self.size is 0:
             return 0.0
         return self.measurements_sum/self.size
 
@@ -1399,7 +1308,7 @@ class MeasurementReducer:
         Returns the difference between the first and last value in the queue.
         """
         queue_len = len(self.queue)
-        if queue_len == 0:
+        if queue_len is 0:
             return 0.0
         return (self.queue[queue_len - 1][0] - self.queue[0][0])/\
                 self.time_interval_size
@@ -1417,10 +1326,12 @@ class NetworkTraffic(Thread):
         Thread.__init__(self)
         self.traffic_lock = Lock()
         self.init_counters()
+        self.daemon = True
+        self.prev_received_bytes = 0
+        self.prev_sent_bytes = 0
 
-        # Shutdown bool value and lock
-        self.should_shutdown = False
-        self.shutdown_lock = Lock()
+        # Used to inform when the object is ready to give relevant statistics
+        self.ramp_up = True
 
 
     def init_counters(self):
@@ -1428,32 +1339,48 @@ class NetworkTraffic(Thread):
         self.sent_bytes = 0
         self.received_packets = 0
         self.sent_packets = 0
+        self.received_bps = 0.0
+        self.sent_bps = 0.0
 
 
     def get_received_bytes(self):
         self.traffic_lock.acquire()
-        temp = self.received_bytes
+        temp = self.received_bytes if not self.ramp_up else None
         self.traffic_lock.release()
         return temp
 
 
     def get_sent_bytes(self):
         self.traffic_lock.acquire()
-        temp = self.sent_bytes
+        temp = self.sent_bytes if not self.ramp_up else None
         self.traffic_lock.release()
         return temp
 
 
     def get_received_packets(self):
         self.traffic_lock.acquire()
-        temp = self.received_packets
+        temp = self.received_packets if not self.ramp_up else None
         self.traffic_lock.release()
         return temp
 
 
     def get_sent_packets(self):
         self.traffic_lock.acquire()
-        temp = self.sent_packets
+        temp = self.sent_packets if not self.ramp_up else None
+        self.traffic_lock.release()
+        return temp
+
+
+    def get_received_bps(self):
+        self.traffic_lock.acquire()
+        temp = self.received_bps if not self.ramp_up else None
+        self.traffic_lock.release()
+        return temp
+
+
+    def get_sent_bps(self):
+        self.traffic_lock.acquire()
+        temp = self.sent_bps if not self.ramp_up else None
         self.traffic_lock.release()
         return temp
 
@@ -1461,18 +1388,12 @@ class NetworkTraffic(Thread):
     def run(self):
         pass
 
-
-    def shutdown(self):
-        self.shutdown_lock.acquire()
-        self.should_shutdown = True
-        self.shutdown_lock.release()
-
         
 
 class LinuxNetworkTraffic(NetworkTraffic):
 
     # Time between reading the information in seconds
-    sleep_time = 0.2
+    sleep_time = 2.0
 
     @staticmethod
     def get_instance():
@@ -1483,16 +1404,19 @@ class LinuxNetworkTraffic(NetworkTraffic):
 
 
     def run(self):
+        step = 0
         while True:
-            self.shutdown_lock.acquire()
-            if self.should_shutdown:
-                self.shutdown_lock.release()
-                break
-            self.shutdown_lock.release()
-            
+            # Waiting until previous measures are done.
+            if step < 2:
+                step += 1
+            else:
+                self.ramp_up = False
+
             try:
                 self.measure_traffic()
             except:
+                # TODO log this
+                traceback.print_exc()
                 pass
             time.sleep(LinuxNetworkTraffic.sleep_time)
 
@@ -1505,6 +1429,9 @@ class LinuxNetworkTraffic(NetworkTraffic):
         traffic_file_lines = traffic_file.readlines()
 
         self.traffic_lock.acquire()
+
+        self.prev_received_bytes = self.received_bytes
+        self.prev_sent_bytes = self.sent_bytes
         self.init_counters()
 
         # Ignoring first 2 lines
@@ -1521,14 +1448,21 @@ class LinuxNetworkTraffic(NetworkTraffic):
                 self.init_counters()
                 return
 
+        self.received_bps = (self.received_bytes - self.prev_received_bytes)/\
+                            LinuxNetworkTraffic.sleep_time
+        self.sent_bps = (self.sent_bytes - self.prev_sent_bytes)/\
+                            LinuxNetworkTraffic.sleep_time
         self.traffic_lock.release()
 
 
 
 class WindowsNetworkTraffic(NetworkTraffic):
 
+    sleep_time = 5.0
+
     @staticmethod
     def get_instance():
+        print 'getting traffic instance ...'
         if NetworkTraffic.instance is None:
             NetworkTraffic.instance = WindowsNetworkTraffic()
             NetworkTraffic.instance.start()
@@ -1539,34 +1473,177 @@ class WindowsNetworkTraffic(NetworkTraffic):
         pythoncom.CoInitialize()
         _wmi = wmi.WMI()
 
+        step = 0
         while True:
-            self.shutdown_lock.acquire()
-            if self.should_shutdown:
-                self.shutdown_lock.release()
-                break
-            self.shutdown_lock.release()
+            # Waiting until previous measures are done.
+            if step < 2:
+                step += 1
+            else:
+                self.ramp_up = False
+
+            # Sleeping since this process takes a lot and it's very CPU
+            # intensive
+            step_start_time = time.time()
+            time.sleep(WindowsNetworkTraffic.sleep_time)
             
             recv_b_temp = 0
             sent_b_temp = 0
             recv_p_temp = 0
             sent_p_temp = 0
-            interfaces = _wmi.Win32_PerfRawData_Tcpip_NetworkInterface()
+            recv_bps_temp = 0.0
+            sent_bps_temp = 0.0
+            
+            args = ['BytesReceivedPersec', 'BytesSentPersec',\
+                    'PacketsReceivedPersec', 'PacketsSentPersec']
+            interfaces = _wmi.Win32_PerfRawData_Tcpip_NetworkInterface(args)
             for interface in interfaces:
-                recv_b_temp += int(interface.BytesReceivedPerSec)
-                sent_b_temp += int(interface.BytesSentPerSec)
-                recv_p_temp += int(interface.PacketsReceivedPerSec)
-                sent_p_temp += int(interface.PacketsSentPerSec)
+                recv_b_temp += int(interface.BytesReceivedPersec)
+                sent_b_temp += int(interface.BytesSentPersec)
+                recv_p_temp += int(interface.PacketsReceivedPersec)
+                sent_p_temp += int(interface.PacketsSentPersec)
+            step_end_time = time.time()
 
+            # Computing the new values
             self.traffic_lock.acquire()
+            self.prev_received_bytes = self.received_bytes
+            self.prev_sent_bytes = self.sent_bytes
             self.received_bytes = recv_b_temp
             self.sent_bytes = sent_b_temp
             self.received_packets = recv_p_temp
             self.sent_packets = sent_p_temp
+            self.received_bps = (self.received_bytes -\
+                    self.prev_received_bytes)/(step_end_time - step_start_time)
+            self.sent_bps = (self.sent_bytes - self.prev_sent_bytes)/\
+                    (step_end_time - step_start_time)
             self.traffic_lock.release()
+            
         pythoncom.CoUninitialize()
 
 
 
+class ProcessesInfo(Thread):
+
+    instance = None
+
+    def __init__(self):
+        """ Singletone: Don't call directly. Use get_instance() """
+        Thread.__init__(self)
+        self.daemon = True
+        self.ramp_up = True
+
+        # Init the processes cpu%
+        pid_list = psutil.get_pid_list()
+        self.processes = {}
+        self.processes_info = None
+        self.processes_lock = Lock()
+        for pid in pid_list:
+            try:
+                self.processes[pid] = psutil.Process(pid)
+                self.processes[pid].get_cpu_percent(interval=0)
+            except:
+                del self.processes[pid]
+
+
+    @staticmethod
+    def get_instance():
+        if ProcessesInfo.instance is None:
+            ProcessesInfo.instance = ProcessesInfo()
+            ProcessesInfo.instance.start()
+        return ProcessesInfo.instance
+
+
+    def run(self):
+        while True:
+            print 'computing ...'
+            self.compute_new_information()
+            time.sleep(3.0)
+
+
+    def compute_new_information(self):
+        current_pid_list = psutil.get_pid_list()
+        old_pid_list = self.processes.keys()
+        new_pid_list = [x for x in current_pid_list if not x in old_pid_list]
+
+        # Delete dead processes
+        for pid in old_pid_list:
+            if pid not in current_pid_list:
+                del self.processes[pid]
+
+        # Add new processes
+        for pid in new_pid_list:
+            try:
+                self.processes[pid] = psutil.Process(pid)
+                self.processes[pid].get_cpu_percent(interval=0)
+            except:
+                try:
+                    del self.processes[pid]
+                except:
+                    pass
+
+        # First measure. Results won't be relevant at this point
+        if self.ramp_up:
+            self.ramp_up = False
+            return
+
+        new_processes_info = []
+        today_day = datetime.date.today()
+        for proc in self.processes.values():
+            try:
+                proc_info = []
+                user = proc.username
+                if WIN and '\\' in user:
+                    user = user.split('\\')[1]
+                pid = proc.pid
+                cpu = round(proc.get_cpu_percent(interval=0), 1)
+                mem = round(proc.get_memory_percent(), 1)
+                rss, vsz = [x/1024 for x in proc.get_memory_info()]
+
+                start = datetime.datetime.fromtimestamp(proc.create_time)
+                if start.date() == today_day:
+                    start = start.strftime('%H:%M')
+                else:
+                    start = start.strftime('%b%d')
+
+                cputime = time.strftime('%M:%S',\
+                        time.localtime(sum(proc.get_cpu_times())))
+
+                cmd = ' '.join(proc.cmdline)
+                if not cmd:
+                    cmd = '[%s]' % proc.name
+
+                # Using a list instead of a dict here since this operation
+                # needs to be finished fast.
+                proc_info.append(user)
+                proc_info.append(pid)
+                proc_info.append(cpu)
+                proc_info.append(mem)
+                proc_info.append(vsz)
+                proc_info.append(rss)
+                proc_info.append(start)
+                proc_info.append(cputime)
+                proc_info.append(cmd)
+                new_processes_info.append(proc_info)
+            except:
+                # The process died before we got to it in this loop
+                del self.processes[proc.pid]
+                pass
+
+        self.processes_lock.acquire()
+        self.processes_info = new_processes_info
+        self.processes_lock.release()
+
+
+    def get_info(self):
+        # If it's too early, then we don't have any relevant information
+        if self.ramp_up:
+            return None
+        self.processes_lock.acquire()
+        temp = self.processes_info
+        self.processes_lock.release()
+        return temp
+
+    
+        
 class CpuPercent(Thread):
     """
     Class to measure the cpu%.
@@ -1581,20 +1658,13 @@ class CpuPercent(Thread):
         Thread.__init__(self)
         self.cpu_percent = psutil.cpu_percent(interval=0.5)
         self.cpu_percent_lock = Lock()
+        self.daemon = True
 
-        self.should_shutdown = False
-        self.shutdown_lock = Lock()
 
 
     def run(self):
         while True:
-            self.shutdown_lock.acquire()
-            if self.should_shutdown:
-                self.shutdown_lock.release()
-                break
-            self.shutdown_lock.release()
-            
-            temp = psutil.cpu_percent(interval=0.2)
+            temp = psutil.cpu_percent(interval=0.4)
             self.cpu_percent_lock.acquire()
             self.cpu_percent = temp
             self.cpu_percent_lock.release()
@@ -1605,12 +1675,6 @@ class CpuPercent(Thread):
         temp = self.cpu_percent
         self.cpu_percent_lock.release()
         return temp/100.0
-
-
-    def shutdown(self):
-        self.shutdown_lock.acquire()
-        self.should_shutdown = True
-        self.shutdown_lock.release()
 
 
         

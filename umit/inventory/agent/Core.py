@@ -126,24 +126,10 @@ class AgentMainLoop:
                 else:
                     self.main_loop_cond_var.acquire()
                     self.added_message_queue_lock.release()
-                    self.main_loop_cond_var.wait()
+                    self.main_loop_cond_var.wait(0.5)
                     self.main_loop_cond_var.release()
         except KeyboardInterrupt:
-            # Release the locks
-            try:
-                self.main_loop_cond_var.release()
-            except:
-                pass
-            try:
-                self.added_message_queue_lock.release()
-            except:
-                pass
-
-            for module in self.modules:
-                module.shutdown()
-                module.join()
             return
-
 
 
 class AgentNotificationParser:
