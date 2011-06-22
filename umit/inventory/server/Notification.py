@@ -115,17 +115,20 @@ class NotificationFields:
     # 3. Associate it's type in the types dictionary.
 
     # The notification fields names.
-    source_host = 'source_host'
+    source_host_ipv4 = 'source_host_ipv4'
+    source_host_ipv6 = 'source_host_ipv6'
     timestamp = 'timestamp'
     protocol = 'protocol'
     fields_class = 'fields_class'
-    notification_type = 'type'
+    notification_type = 'event_type'
     description = 'description'
-    names = [source_host, timestamp, protocol,notification_type, description]
+    names = [source_host_ipv4, source_host_ipv6, timestamp, protocol,\
+             notification_type, description]
 
     # The notification fields types.
     types = dict()
-    types[source_host] = str
+    types[source_host_ipv4] = str
+    types[source_host_ipv6] = str
     types[timestamp] = float
     types[protocol] = str
     types[fields_class] = str

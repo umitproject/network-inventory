@@ -179,7 +179,8 @@ class SNMPListener(ListenerServerModule, ServerModule):
             fields[SNMPv1NotificationFields.uptime] = int(uptime)
 
             # Notification general fields
-            fields[NotificationFields.source_host] = str(agent_address)
+            fields[NotificationFields.source_host_ipv4] = str(agent_address)
+            fields[NotificationFields.source_host_ipv6] = ''
             fields[NotificationFields.timestamp] = float(time.time())
             fields[NotificationFields.protocol] = str(self.get_protocol_name())
             fields[NotificationFields.description] =\
@@ -282,7 +283,8 @@ class SNMPListener(ListenerServerModule, ServerModule):
                     str(trap_enterprise)
 
             # General notification fields
-            fields[NotificationFields.source_host] = str(source_host)
+            fields[NotificationFields.source_host_ipv4] = str(source_host)
+            fields[NotificationFields.source_host_ipv6] = ''
             fields[NotificationFields.timestamp] = float(time.time())
             fields[NotificationFields.protocol] = str(self.get_protocol_name())
             fields[NotificationFields.description] =\

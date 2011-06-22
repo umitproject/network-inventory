@@ -18,13 +18,9 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import sys
-import traceback
 
-import umit.inventory
-from umit.inventory import agent
 from umit.inventory.agent.Configs import AgentConfig
 from umit.inventory.agent import Core
-from umit.inventory.agent.Core import CorruptAgentModule
 
 
 def main(args):
@@ -43,42 +39,6 @@ def main(args):
     # The event-based main loop of the Agent.
     agent_main_loop = Core.AgentMainLoop(parser, conf)
 
-    """
-    # Initialize the monitoring modules
-    modules_names = conf.get_modules_list()
-    modules = []
-    for module_name in modules_names:
-        if not conf.module_get_enable(module_name):
-            continue
-        try:
-            module_path = conf.module_get_option(module_name,\
-                    AgentConfig.module_path)
-            module_obj = umit.inventory.common.load_module(module_name,\
-                    module_path, conf, agent_main_loop)
-
-            # Do a sanity check to test the module is correct
-            try:
-                module_name = module_obj.get_name()
-            except:
-                raise CorruptAgentModule(module_name, module_path,\
-                        CorruptAgentModule.get_name)
-            if module_name != module_obj.get_name():
-                raise CorruptAgentModule(module_name, module_path,\
-                        CorruptAgentModule.get_name)
-
-        except Exception, e:
-            traceback.print_exc()
-            continue
-
-        modules.append(module_obj)
-
-    # Set the modules for the agent main loop
-    agent_main_loop.modules = modules
-
-    # Start the monitoring modules
-    for module in modules:
-        module.start()
-    """
     # Start the main loop
     agent_main_loop.run()
 

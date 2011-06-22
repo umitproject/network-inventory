@@ -66,6 +66,14 @@ class ServerModule:
         pass
 
 
+    def shutdown(self):
+        """
+        Called when the Server is shutting down. The module should do
+        any needed operations for closing down in this method.
+        """
+        pass
+
+
     class NotImplemented(Exception):
 
         def __init__(self, name):

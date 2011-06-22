@@ -23,7 +23,7 @@ from umit.inventory.server.Module import SubscriberServerModule
 from umit.inventory.server.Notification import Notification
 
 import traceback
-
+from copy import copy
 
 class Database:
     """
@@ -114,7 +114,10 @@ class Database:
 
         if not isinstance(notification, Notification):
             return
-        self.notifications_collection.insert(notification.fields)
+
+        # Saving a copy since mongodb will add the ObjectID to the dictionary
+        # which won't keep it JSON seriazable
+        self.notifications_collection.insert(copy(notification.fields))
 
 
     # Mongo wrappers

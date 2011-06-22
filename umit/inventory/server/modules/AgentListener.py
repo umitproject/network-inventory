@@ -71,8 +71,10 @@ class AgentListener(ListenerServerModule, ServerModule):
         # Must be careful, as it may be invalid and not contain all the fields.
         fields = dict()
         try:
-            fields[NotificationFields.source_host] =\
-                    str(temp[AgentFields.source_host])
+            # TODO update this
+            fields[NotificationFields.source_host_ipv4] = host
+            #        str(temp[AgentFields.source_host])
+            fields[NotificationFields.source_host_ipv6] = ''
 
             fields[NotificationFields.timestamp] =\
                     float(temp[AgentFields.timestamp])

@@ -28,11 +28,11 @@ from umit.inventory.common import NotificationTypes
 class TestModule(MonitoringModule):
 
     # The name of the fields in the configuration file
-    min_time_config = "MinTimeConfig"
-    max_time_config = "MaxTimeConfig"
-    message_size = "MessageSize"
-    fields_num = "FieldsNumber"
-    fields_length = "FieldsLength"
+    min_time_config = "min_time"
+    max_time_config = "max_time"
+    message_size = "message_size"
+    fields_num = "fields_number"
+    fields_length = "fields_length"
 
 
     def __init__(self, configs, agent_main_loop):
@@ -56,7 +56,7 @@ class TestModule(MonitoringModule):
     def _generate_random_message(self):
         # Waits a random time and generates a random message.
         temp = random() * (self.max_sleep_time - self.min_sleep_time)
-        sleep_time = self.min_sleep_time = temp
+        sleep_time = self.min_sleep_time + temp
         time.sleep(sleep_time)
 
         msg = ''
