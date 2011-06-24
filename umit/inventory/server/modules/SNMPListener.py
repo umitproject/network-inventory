@@ -35,6 +35,7 @@ from pysnmp.proto.secmod.rfc3414 import auth, priv, localkey
 import traceback
 from copy import copy
 import time
+import socket
 
 
 class SNMPListener(ListenerServerModule, ServerModule):
@@ -147,7 +148,6 @@ class SNMPListener(ListenerServerModule, ServerModule):
         # Get the variables
         variables_dict = dict()
         variables = prot_module.apiTrapPDU.getVarBinds(trap_pdu)
-        #print variables
 
         for oid, value in variables:
             oid_str = oid.prettyPrint()
@@ -158,8 +158,6 @@ class SNMPListener(ListenerServerModule, ServerModule):
                 traceback.print_exc()
                 continue
 
-            #print '%s = %s (%s)' % (oid_str, converted_value,\
-            #        type(converted_value))
             variables_dict[oid_str] = converted_value
 
         # Parse to Notification object
@@ -175,8 +173,8 @@ class SNMPListener(ListenerServerModule, ServerModule):
             fields[SNMPv1NotificationFields.uptime] = int(uptime)
 
             # Notification general fields
-            fields[NotificationFields.source_host_ipv4] = str(agent_address)
-            fields[NotificationFields.source_host_ipv6] = ''
+            # Will fill: source_host_ipv4, source_host_ipv6, hostname
+            SNMPUtils.fill_fields_with_host_info(fields, agent_address_str)
             fields[NotificationFields.timestamp] = float(time.time())
             fields[NotificationFields.protocol] = str(self.get_protocol_name())
             fields[NotificationFields.description] =\
@@ -252,7 +250,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
             # Optional parameter. Saving in specific dictionary
             optional_parameters[key] = value
 
-        # If the host which emited it isn't remote, then the source address
+        # If the host which emitted it isn't remote, then the source address
         # is the one mentioned in the IP packet.
         if source_host is None:
             source_host = host
@@ -279,8 +277,9 @@ class SNMPListener(ListenerServerModule, ServerModule):
                     str(trap_enterprise)
 
             # General notification fields
-            fields[NotificationFields.source_host_ipv4] = str(source_host)
-            fields[NotificationFields.source_host_ipv6] = ''
+            # Will fill: source_host_ipv4, source_host_ipv6, hostname
+            SNMPUtils.fill_fields_with_host_info(fields, host)
+
             fields[NotificationFields.timestamp] = float(time.time())
             fields[NotificationFields.protocol] = str(self.get_protocol_name())
             fields[NotificationFields.description] =\
@@ -541,6 +540,27 @@ class SNMPUtils:
 
         # Enterprise specific
         return NotificationTypes.unknown
+
+
+    @staticmethod
+    def fill_fields_with_host_info(fields, host):
+        # Determine if the IP Address is IPv4 or IPv6
+        host_ip = str(host)
+        is_ipv4 = True
+        try:
+            socket.inet_aton(host_ip)
+        except:
+            is_ipv4 = False
+
+        # Initialisation of the IP address based on the previous logic
+        fields[NotificationFields.source_host_ipv4] = ''
+        fields[NotificationFields.source_host_ipv6] = ''
+        if is_ipv4:
+            fields[NotificationFields.source_host_ipv4] = host_ip
+        else:
+            fields[NotificationFields.source_host_ipv6] = host_ip
+
+        fields[NotificationFields.hostname] = socket.gethostbyaddr(host_ip)
 
 
 

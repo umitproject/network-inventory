@@ -38,7 +38,7 @@ class NotificationTypes:
 
 class AgentFields:
 
-    source_host = 'source_host'
+    hostname = 'hostname'
     timestamp = 'timestamp'
     message = 'message'
     message_type = 'type'
@@ -58,8 +58,7 @@ class AgentNotificationParser:
         message_obj[AgentFields.message_type] = msg_type
         message_obj[AgentFields.timestamp] = time.time()
         message_obj[AgentFields.monitoring_module] = module
-        # TODO : get the IP address of the Host
-        message_obj[AgentFields.source_host] = socket.gethostname()
+        message_obj[AgentFields.hostname] = socket.gethostname()
         message_obj[AgentFields.module_fields] = dict()
         for i in fields.keys():
             message_obj[AgentFields.module_fields][i] = fields[i]

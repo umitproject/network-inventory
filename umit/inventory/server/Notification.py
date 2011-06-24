@@ -117,6 +117,7 @@ class NotificationFields:
     # The notification fields names.
     source_host_ipv4 = 'source_host_ipv4'
     source_host_ipv6 = 'source_host_ipv6'
+    hostname = 'hostname'
     timestamp = 'timestamp'
     protocol = 'protocol'
     fields_class = 'fields_class'

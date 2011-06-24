@@ -730,6 +730,7 @@ class DeviceValueTracker:
                 notif_msg_variables, self.notif_vars_modifiers)
         try:
             computed_notif_msg = self.notif_msg % tuple(notif_msg_variables)
+            print computed_notif_msg
         except:
             return
 
@@ -738,12 +739,17 @@ class DeviceValueTracker:
 
     def _apply_modifiers(self, var_value, var_modifier):
         print '%s has modifier %s' % (str(var_value), str(var_modifier))
-        if var_modifier is None:
-            return var_value
+        if var_modifier is None or (type(var_modifier) != int and\
+                type(var_modifier) != float):
+            if type(var_value) == float:
+                return round(var_value, 2)
+            else:
+                return var_value
+
         if (type(var_value) != int and type(var_value) != float)\
                 or var_modifier == 0:
-            print type(var_value)
             return var_value
+
         return round(float(var_value)/var_modifier, 2)
 
 
@@ -784,15 +790,6 @@ class MeasurementGenerator:
         """ Does the actual measuring. Should be implemented. """
         pass
 
-
-    def is_ready(self):
-        """
-        Returns True if the MeasurementGenerator is ready to provide accurate
-        results. This function should be checked each time before calling
-        get_latest_value().
-        Should be overwritten.
-        """
-        return True
 
 
 # Measurement generators -- START

@@ -17,18 +17,16 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 
-from umit.inventory.server.Core import ServerShell
 from umit.inventory.server.Module import ListenerServerModule
 from umit.inventory.server.Module import ServerModule
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
-import umit.inventory.server.Notification
 from umit.inventory.common import AgentFields
 
 from twisted.internet import reactor
-from twisted.internet.protocol import ServerFactory
 from twisted.internet.protocol import DatagramProtocol
 
+import socket
 import traceback
 import json
 from copy import copy
@@ -71,10 +69,24 @@ class AgentListener(ListenerServerModule, ServerModule):
         # Must be careful, as it may be invalid and not contain all the fields.
         fields = dict()
         try:
-            # TODO update this
-            fields[NotificationFields.source_host_ipv4] = host
-            #        str(temp[AgentFields.source_host])
+            # Determine if the IP Address is IPv4 or IPv6
+            host_ip = str(host)
+            is_ipv4 = True
+            try:
+                socket.inet_aton(host_ip)
+            except:
+                is_ipv4 = False
+
+            # Initialisation of the IP address based on the previous logic
+            fields[NotificationFields.source_host_ipv4] = ''
             fields[NotificationFields.source_host_ipv6] = ''
+            if is_ipv4:
+                fields[NotificationFields.source_host_ipv4] = host_ip
+            else:
+                fields[NotificationFields.source_host_ipv6] = host_ip
+    
+            fields[NotificationFields.hostname] =\
+                    str(temp[AgentFields.hostname])
 
             fields[NotificationFields.timestamp] =\
                     float(temp[AgentFields.timestamp])
@@ -86,7 +98,7 @@ class AgentListener(ListenerServerModule, ServerModule):
 
             fields[NotificationFields.description] =\
                     unicode(temp[AgentFields.message])
-
+            
             fields[AgentNotificationFields.monitoring_module] =\
                     unicode(temp[AgentFields.monitoring_module])
 
