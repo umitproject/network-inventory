@@ -25,6 +25,7 @@ import json
 import re
 import psutil
 import traceback
+import logging
 from socket import gethostname
 from collections import deque
 from threading import Thread
@@ -90,7 +91,7 @@ class DeviceSensor(MonitoringModule):
 
 
     def run(self):
-
+        logging.info('Starting up the %s module ...', self.get_name())
         while True:
             
             pre_update_time = time.time()
@@ -104,7 +105,7 @@ class DeviceSensor(MonitoringModule):
 
     def init_default_settings(self):
         self.options[DeviceSensor.test_time] = '0.25'
-        self.options[DeviceSensor.report_time] = '5'
+        self.options[DeviceSensor.report_time] = '10'
         self.options[DeviceSensor.report_template_file] =\
                 os.path.join('umit', 'inventory', 'agent', 'modules',\
                 'device_sensor_report_template.txt')
@@ -225,6 +226,8 @@ class MeasurementManager:
         # measured_variables dict
         self.measured_variables_last_id = 0
 
+        logging.info('Initialized the DeviceSensor MeasurementManager')
+
 
     def add_measurement(self, var_name, var_param=None):
         """
@@ -238,16 +241,20 @@ class MeasurementManager:
         """
         # Since is constant, the ID doesn't really matter
         if var_name in self.const_measurements.keys():
+            logging.debug('Asking measurement for constant variable %s',\
+                          var_name)
             return var_name
 
         # The variable is already measured, returning it's name
         if var_name in self.measured_variables.keys():
+            logging.debug('Already measured variable id %s', var_name)
             return var_name
 
         # The variable isn't measured. Checking if it's non-configurable.
         if var_name in self.measurement_objects.keys():
             self.measured_variables[var_name] =\
                     self.measurement_objects[var_name]
+            logging.debug('Adding measurement for variable %s', var_name)
             return var_name
 
         # If it's a configurable variable
@@ -256,6 +263,7 @@ class MeasurementManager:
             conf_measure_id = var_name + '::' + str(var_param)
             
             if conf_measure_id in self.conf_measurement_ids.keys():
+                logging.debug('Already measured variable id %s', var_name)
                 return self.conf_measurement_ids[conf_measure_id]
 
             self.measured_variables_last_id += 1
@@ -264,6 +272,8 @@ class MeasurementManager:
             self.measured_variables[new_id] =\
                     self.conf_measurement_classes[var_name](var_param)
             self.conf_measurement_ids[conf_measure_id] = new_id
+            logging.debug('Adding measurement for variable %s with id %s',\
+                          var_name, new_id)
             return new_id
 
         raise InvalidVariableName(var_name)
@@ -352,6 +362,8 @@ class TrackersManager:
         self.measurement_manager.add_measurement(DeviceSensor.net_sent_bytes)
         self.measurement_manager.add_measurement(DeviceSensor.net_recv_bytes)
 
+        logging.info('Initialized DeviceSensor TrackersManager')
+
 
     def update(self):
         """ Forces all the trackers to check their value """
@@ -365,13 +377,16 @@ class TrackersManager:
         try:
             f = open(trackers_file)
         except:
-            # TODO log this
+            logging.error('Could not open DeviceSensor trackers file at %s',\
+                          trackers_file)
             return
         trackers_file_content = f.read()
         try:
             file_trackers_list = json.loads(trackers_file_content)
         except:
-            # TODO log this
+            error_str = 'Could not load DeviceSensor trackers file at %s.\n'
+            error_str += 'Make sure it is JSON seriazable.'
+            logging.error(error_str, trackers_file)
             return
 
         try:
@@ -380,16 +395,17 @@ class TrackersManager:
                 if tracker is not None:
                     self.trackers.append(tracker)
         except:
-            traceback.print_exc()
-            # TODO log this
-            pass
+            error_str = 'Failed loading DeviceSensor trackers from file at %s.'
+            logging.error(error_str, trackers_file, exc_info=True)
+
 
     def parse_report_file(self, report_file, report_cooldown):
         """ Parses the report file template and adds a special tracker """
         try:
             f = open(report_file)
         except:
-            # TODO log this
+            error_str = 'Failed opening DeviceSensor report template at %s'
+            logging.error(error_str, report_file)
             return
         report_template = f.read()
         tracker_def = dict()
@@ -410,9 +426,8 @@ class TrackersManager:
             tracker = self._tracker_from_definition(tracker_def, True)
             self.trackers.append(tracker)
         except:
-            # TODO log this
-            traceback.print_exc()
-            pass
+            error_str = 'Failed loading DeviceSensor template defined at %s'
+            logging.error(error_str, report_file, exc_info=True)
 
 
     def _tracker_from_definition(self, tracker_def, report_tracker=False):
@@ -462,6 +477,21 @@ class TrackersManager:
             tracker_class = ReportTracker
         else:
             tracker_class = DeviceValueTracker
+
+        # Log the tracker
+        if not report_tracker:
+            info_str = 'Loaded tracker with definition:\n'
+            info_str += json.dumps(tracker_def, sort_keys=True, indent=4)
+            info_str += '\nPre-formated body:\n'
+            info_str += notif_msg
+            logging.info(info_str)
+        else:
+            info_str = 'Loaded report with the following pre-formated body:\n'
+            info_str += notif_msg
+            info_str += 'Reporting each %f seconds' % cooldown
+            logging.info(info_str)
+
+        # Return the initialized tracker
         return tracker_class(self.measurement_manager, var_id, threshold,\
                 threshold_comp, notif_msg, notif_type, notif_vars,\
                 notif_vars_modifiers, self, cooldown, mode, reducing_time)
@@ -501,9 +531,7 @@ class TrackersManager:
             if var_name == 'threshold' or var_name == 'value':
                 notif_vars.append(var_name)
                 continue
-            print var_name
             vid = self.measurement_manager.add_measurement(var_name, var_param)
-            print vid
             notif_vars.append(vid)
 
         # Replace the variables with the %s string
@@ -631,6 +659,7 @@ class DeviceValueTracker:
         self.start_up_time = time.time()
         self.ramp_up_done = False
         self.time_interval_size = time_interval_size
+        self.shutdown = False
 
         if track_type == DeviceValueTracker.differential or\
                 track_type == DeviceValueTracker.average:
@@ -657,6 +686,9 @@ class DeviceValueTracker:
 
     def check_value(self):
         """ Checks that the value is under the given limits """
+        if self.shutdown:
+            return
+
         # If we are cooling down, we shouldn't send a notification
         if not self.check_cooldown():
             return
@@ -683,6 +715,11 @@ class DeviceValueTracker:
         # Check the current value and start cooling down if we should send a
         # notification.
         if self.value_over_limits():
+            info_str = 'Device Sensor:\n'
+            info_str += 'Variable %s is over the limit %s. Current_value: %s\n'
+            info_str += 'Generating a notification ...'
+            logging.info(info_str, self.var_id, str(self.var_id),\
+                         str(self.latest_value))
             self.alert()
             self.cooling_down = True
             self.cooling_down_end = time.time() + self.cooldown
@@ -708,7 +745,16 @@ class DeviceValueTracker:
 
 
     def alert(self):
+        if self.var_id is not None:
+            logging.debug('Sending an DeviceSensor alert for %s', self.var_id)
+        else:
+            logging.debug('Sending an Device Sensor report ...')
+        
         # Format the message
+        error_str = 'Failed parsing notification message for '
+        error_str += 'DeviceSensor Tracker tracking %s\n' % self.var_id
+        error_str += 'Shutting down tracker ...'
+        
         notif_msg_variables = []
         for var in self.notif_vars:
             if var == 'value':
@@ -722,19 +768,23 @@ class DeviceValueTracker:
                 if var_value is None:
                     var_value = '[Undefined]'
             except:
-                # TODO maybe log this
-                traceback.print_exc()
+                logging.error(error_str, exc_info=True)
+                self.shutdown = True
                 return
             notif_msg_variables.append(var_value)
         notif_msg_variables = map(self._apply_modifiers,\
                 notif_msg_variables, self.notif_vars_modifiers)
         try:
             computed_notif_msg = self.notif_msg % tuple(notif_msg_variables)
-            print computed_notif_msg
         except:
+            logging.error(error_str, exc_info=True)
+            self.shutdown = True
             return
 
-        self.tracker_manager.alert(computed_notif_msg, self.notif_type)
+        try:
+            self.tracker_manager.alert(computed_notif_msg, self.notif_type)
+        except:
+            logging.error('DeviceSensor tracker failed to alert', exc_info=True)
 
 
     def _apply_modifiers(self, var_value, var_modifier):
@@ -1402,6 +1452,7 @@ class LinuxNetworkTraffic(NetworkTraffic):
 
     def run(self):
         step = 0
+        logging.info('Starting up Network Traffic measurement ...')
         while True:
             # Waiting until previous measures are done.
             if step < 2:
@@ -1412,9 +1463,11 @@ class LinuxNetworkTraffic(NetworkTraffic):
             try:
                 self.measure_traffic()
             except:
-                # TODO log this
-                traceback.print_exc()
-                pass
+                self.ramp_up = True
+                error_msg = 'Device Sensor: Failed to measure network traffic.'
+                error_msg += '\nShutting down traffic measurement.'
+                logging.error(error_msg)
+                return
             time.sleep(LinuxNetworkTraffic.sleep_time)
 
 
@@ -1459,7 +1512,6 @@ class WindowsNetworkTraffic(NetworkTraffic):
 
     @staticmethod
     def get_instance():
-        print 'getting traffic instance ...'
         if NetworkTraffic.instance is None:
             NetworkTraffic.instance = WindowsNetworkTraffic()
             NetworkTraffic.instance.start()
@@ -1471,6 +1523,7 @@ class WindowsNetworkTraffic(NetworkTraffic):
         _wmi = wmi.WMI()
 
         step = 0
+        logging.info('Starting up Network Traffic measurement ...')
         while True:
             # Waiting until previous measures are done.
             if step < 2:
@@ -1550,8 +1603,8 @@ class ProcessesInfo(Thread):
 
 
     def run(self):
+        logging.info('Starting DeviceSensor ProcessesInfo ...')
         while True:
-            print 'computing ...'
             self.compute_new_information()
             time.sleep(3.0)
 
@@ -1660,6 +1713,7 @@ class CpuPercent(Thread):
 
 
     def run(self):
+        logging.info('Starting up DeviceSensor CpuPercent ...')
         while True:
             temp = psutil.cpu_percent(interval=0.4)
             self.cpu_percent_lock.acquire()

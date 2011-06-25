@@ -18,10 +18,11 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import sys
+import logging
 
 from umit.inventory.agent.Configs import AgentConfig
 from umit.inventory.agent import Core
-
+from umit.inventory import Logger
 
 def main(args):
     """The Umit Agent main function"""
@@ -31,6 +32,9 @@ def main(args):
     # for details regarding the configuration file location and default
     # settings.
     conf = AgentConfig()
+
+    # Init the logging
+    Logger.init_logger(conf, logging.DEBUG, True)
 
     # The message Parser which will encrypt (if specified) and send the 
     # messages.

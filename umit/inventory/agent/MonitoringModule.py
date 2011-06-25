@@ -17,6 +17,8 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 from threading import Thread
+import logging
+import json
 
 from umit.inventory.common import AgentNotificationParser
 
@@ -37,11 +39,16 @@ class MonitoringModule(Thread):
         self.options = dict()
         self.init_default_settings()
         self.daemon = True
+        self.name = self.get_name()
 
         # Get the options from the configs and save them
         module_config_options = configs.items(self.get_name())
         for option in module_config_options:
             self.options[option[0]] = option[1]
+
+        # Log the configurations
+        logging.info('Configurations for module %s:\n%s', self.get_name(),\
+                     json.dumps(self.options, sort_keys=True, indent=4))
 
         # Save the agent Main Loop which will get the Module's messages
         self.agent_main_loop = agent_main_loop
@@ -60,7 +67,6 @@ class MonitoringModule(Thread):
         msg_type: The type of the message. See umit.inventory.common
         fields: A dictionary with the module specific fields.
         """
-        print "sending a message ..."
         notification = AgentNotificationParser.parse(message, msg_type,\
                 fields, self.get_name())
         self.agent_main_loop.add_message(notification)

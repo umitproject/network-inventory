@@ -72,6 +72,9 @@ class InventoryConfig(ConfigParser):
     # General section options
     general_section = 'GeneralSection'
 
+    # Log path and default
+    log_path = 'log_path'
+
     # Modules standard options
     module_enabled = 'enabled'
     module_path = 'path'
@@ -81,10 +84,10 @@ class InventoryConfig(ConfigParser):
         ConfigParser.__init__(self)
         self.config_file_path = config_file_path
 
-        if config_file_path == None:
+        if config_file_path is None:
             self._set_default_config_file()
 
-        if self.config_file_path == None:
+        if self.config_file_path is None:
             self.load_default_settings()
         else:
             self.load_settings()
@@ -118,6 +121,7 @@ class InventoryConfig(ConfigParser):
         it, then it will raise an InventoryConfig.ConfigFile exception.
         The newly created file will also be filled with the default settings.
         """
+        self._set_default_settings()
         if not os.path.isfile(self.config_file_path):
             try:
                 config_file = open(self.config_file_path, 'w')
@@ -234,12 +238,21 @@ class InventoryConfig(ConfigParser):
         for section in sections:
             self.remove_section(section)
 
+
     def _set_default_settings(self):
         """Load default fail-save settings"""
-        pass
+        self.add_section(InventoryConfig.general_section)
+        self.set(InventoryConfig.general_section, InventoryConfig.log_path,\
+                 self._get_default_log_path())
+
 
     def _set_default_config_file(self):
         """Sets the default configuration file"""
+        pass
+
+
+    def _get_default_log_path(self):
+        """Returns the default log path. Must be implemented"""
         pass
 
 
@@ -276,7 +289,7 @@ class InventoryConfig(ConfigParser):
 def load_module(module_name, module_path, *module_args):
     """Loads a module with the given name from the given path."""
 
-    path_tokens = module_path.split('/') # TODO - for Windows
+    path_tokens = module_path.split('/')
     modname = ''
     for path_token in path_tokens:
         modname += path_token + '.'

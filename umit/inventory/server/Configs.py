@@ -31,16 +31,15 @@ class ServerConfig(InventoryConfig):
     general_section = 'GeneralSection'
     interface_port = 'interface_port'
 
-
     def get_core_modules(self):
         return ['Database']
 
 
     def _set_default_settings(self):
         """Load default fail-safe settings"""
+        InventoryConfig._set_default_settings(self)
 
         # General settings
-        self.add_section(InventoryConfig.general_section)
         self.set(InventoryConfig.general_section,\
                 ServerConfig.interface_port,\
                 ServerConfig.default_interface_port)
@@ -67,3 +66,8 @@ class ServerConfig(InventoryConfig):
         self.config_file_path = ServerConfig.file_path
 
 
+    def _get_default_log_path(self):
+        if os.name == 'posix':
+            return '/var/log/umit-notifications-server/'
+        else:
+            return 'logs\\umit-notifications-server\\'

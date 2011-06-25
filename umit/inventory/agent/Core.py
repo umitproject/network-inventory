@@ -18,12 +18,11 @@
 
 import threading
 import socket
-import traceback
+import logging
 
 from umit.inventory.agent.Configs import AgentConfig
 from umit.inventory.common import CorruptInventoryModule
 from umit.inventory import common
-
 
 class AgentMainLoop:
 
@@ -33,6 +32,7 @@ class AgentMainLoop:
         method. It depends on implementation, but most likely, it will send
         the message trough UDP to the Notifications Server.
         """
+        logging.info('Initing the AgentMainLoop ...')
 
         # The monitoring modules add the messages trough the add_message(msg)
         # method and are stored in the added_message_queue. Before parsing
@@ -81,7 +81,7 @@ class AgentMainLoop:
         """
         try:
             # Load up the modules
-            # TODO log this
+            logging.info('Loading up the modules ...')
             modules_names = self.conf.get_modules_list()
             for module_name in modules_names:
                 if not self.conf.module_get_enable(module_name):
@@ -103,9 +103,10 @@ class AgentMainLoop:
                                 CorruptAgentModule.get_name)
         
                 except Exception, e:
-                    traceback.print_exc()
-                    continue
+                    logging.error('Loading failed for module %s',\
+                                 module_name, exc_info=True)
 
+                logging.info('Loaded module %s', module_obj.get_name())
                 self.modules.append(module_obj)
 
             # Start up the modules
@@ -113,6 +114,7 @@ class AgentMainLoop:
                 module.start()
 
             # The actual main loop
+            logging.info('Starting the Agent Main Loop')
             while True:
                 self.added_message_queue_lock.acquire()
                 if self.received_messages:
@@ -162,10 +164,9 @@ class AgentNotificationParser:
         else:
             sent_msg = message
 
-        print '-------------------------------------'
-        print 'Sending message to ' + self.server_addr + ':' + str(self.server_port) + ' ...'
-        print message
-        print '-------------------------------------'
+        logging.debug('Sending message to %s:%d. Actual message:\n%s',\
+                self.server_addr, self.server_port, message)
+
         # Send the message trough UDP
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.sendto(sent_msg, (self.server_addr, self.server_port))

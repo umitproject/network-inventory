@@ -66,7 +66,7 @@ class EmailSender(ServerModule, SubscriberServerModule):
         self.options[EmailSender.server_port] = 587
         self.options[EmailSender.from_addr] = 'dragosdena2@gmail.com'
         self.options[EmailSender.login] = 'dragosdena2@gmail.com'
-        self.options[EmailSender.to_list] = 'dena_dr89@yahoo.com,dragos.dena@gmail.com,rodolfo.ueg@gmail.com'
+        self.options[EmailSender.to_list] = 'dena_dr89@yahoo.com,dragos.dena@gmail.com'
         self.options[EmailSender.password] = 'guestpassword'
         self.options[EmailSender.enable_html] = True
         self.options[EmailSender.send_for] = 'CRITICAL,INFO'

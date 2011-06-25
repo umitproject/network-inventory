@@ -21,6 +21,7 @@ from random import choice
 import string
 import time
 import threading
+import logging
 
 from umit.inventory.agent.MonitoringModule import MonitoringModule
 from umit.inventory.common import NotificationTypes
@@ -90,7 +91,7 @@ class TestModule(MonitoringModule):
 
 
     def run(self):
-
+        logging.info('Starting up the %s module ...', self.get_name())
         while True:
             msg = self._generate_random_message()
             msg_type = self._generate_random_type()

@@ -36,9 +36,9 @@ class AgentConfig(InventoryConfig):
 
     def _set_default_settings(self):
         """Load default fail-save settings"""
-
+        InventoryConfig._set_default_settings(self)
+        
         # General settings
-        self.add_section(InventoryConfig.general_section)
         self.set(InventoryConfig.general_section, AgentConfig.encrypt_enabled,\
                 AgentConfig.default_encrypt_enabled)
         self.set(InventoryConfig.general_section, AgentConfig.server_addr,\
@@ -63,3 +63,8 @@ class AgentConfig(InventoryConfig):
         self.config_file_path = AgentConfig.file_path
 
 
+    def _get_default_log_path(self):
+        if os.name == 'posix':
+            return '/var/log/umit-agent/'
+        else:
+            return 'logs\\umit-agent\\'
