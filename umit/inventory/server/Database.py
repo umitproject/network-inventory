@@ -20,8 +20,10 @@ import pymongo
 
 from umit.inventory.server.Notification import Notification
 
-import traceback
+import logging
+import json
 from copy import copy
+
 
 class Database:
     """
@@ -80,13 +82,20 @@ class Database:
         self.connection = None
         self.database = None
         try:
+            logging.info('Trying to connect to the database ...')
             self._connect()
+            logging.info('Successfully connected to the database.')
         except Exception, e:
-            # TODO log this
-            traceback.print_exc()
-
-        # If we failed to connect to the database.
-        if self.database == None:
+            critical_msg = 'Failed to load database. Shutting down.\n'
+            critical_msg += 'Make sure you have MongoDatabase installed and '
+            critical_msg += 'that the mongod daemon is running.\n'
+            critical_msg += 'Database Name: %s\n' % self.database_name
+            critical_msg += 'Database Host: %s\n' % self.host
+            if self.port == '':
+                critical_msg += 'Database Port: [Default mongodb port]'
+            else:
+                critical_msg += 'Databse Port: %s' % self.port
+            logging.critical(critical_msg, exc_info=True)
             return
 
         # The collection where the notifications will be stored (if configured
@@ -102,16 +111,17 @@ class Database:
         if not self.store_notifications:
             return
 
-        # Make sure we succcesfully connected to the db
-        if self.database == None:
+        # Make sure we successfully connected to the db
+        if self.database is None:
             return
-
-        print '--------- STORING -----------'
-        print notification.fields
-        print '-----------------------------'
 
         if not isinstance(notification, Notification):
+            logging.debug('%s is not of Notification class',\
+                          notification.fields)
             return
+
+        logging.debug('############# STORING #########\n%s',\
+                      json.dumps(notification.fields, sort_keys=True, indent=4))
 
         # Saving a copy since mongodb will add the ObjectID to the dictionary
         # which won't keep it JSON seriazable
@@ -142,7 +152,7 @@ class Database:
         sorted_fields: A list of (field_name, direction) to sort the results.
         direction should be True for ascending sort and False for descending.
         """
-        if sorted_fields != None:
+        if sorted_fields is not None:
             for entry in sorted_fields:
                 entry[1] = pymongo.ASCENDING if entry[1] else\
                            pymongo.DESCENDING
@@ -179,7 +189,6 @@ class Database:
 
     def _connect(self):
         """ Connects to the database as configured """
-
         # Initialize the host string considering username/password (if present)
         auth_string = self.username + ':' + self.password + '@'
         host_string = auth_string if self.username != '' else ''
@@ -191,4 +200,3 @@ class Database:
             self.connection = pymongo.Connection(host_string)
 
         self.database = self.connection[self.database_name]
-

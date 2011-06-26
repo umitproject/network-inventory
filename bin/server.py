@@ -18,12 +18,11 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import sys
-import traceback
+import logging
 
-from umit.inventory import server
-from umit.inventory import common
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.server.Core import ServerCore
+from umit.inventory import Logger
 
 
 def main(args):
@@ -33,6 +32,9 @@ def main(args):
     # for details regarding the configuration file location and default
     # settings
     conf = ServerConfig()
+
+    # Init the logging
+    Logger.init_logger(conf, logging.DEBUG, True)
 
     # Load the Core based on the configs.
     core = ServerCore(conf)

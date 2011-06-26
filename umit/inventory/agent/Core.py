@@ -19,9 +19,12 @@
 import threading
 import socket
 import logging
+import json
+import time
 
 from umit.inventory.agent.Configs import AgentConfig
 from umit.inventory.common import CorruptInventoryModule
+from umit.inventory.common import AgentFields
 from umit.inventory import common
 
 class AgentMainLoop:
@@ -41,11 +44,14 @@ class AgentMainLoop:
         self.parsing_message_queue = []
         self.added_message_queue = []
         self.added_message_queue_lock = threading.Lock()
-        self.main_loop_cond_var = threading.Condition()
         self.received_messages = False
         self.message_parser = message_parser
         self.modules = []
         self.conf = configurations
+
+        # Get the polling time for the loop
+        self.polling_time =\
+                float(self.conf.get_general_option(AgentConfig.polling_time))
 
 
     def _parse_messages(self):
@@ -65,10 +71,7 @@ class AgentMainLoop:
         self.added_message_queue_lock.acquire()
 
         self.added_message_queue.append(message)
-        self.main_loop_cond_var.acquire()
-        self.main_loop_cond_var.notify()
         self.received_messages = True
-        self.main_loop_cond_var.release()
 
         self.added_message_queue_lock.release()
 
@@ -124,12 +127,11 @@ class AgentMainLoop:
                     self.added_message_queue_lock.release()
 
                     self._parse_messages()
-
                 else:
-                    self.main_loop_cond_var.acquire()
                     self.added_message_queue_lock.release()
-                    self.main_loop_cond_var.wait(0.5)
-                    self.main_loop_cond_var.release()
+
+                time.sleep(self.polling_time)
+
         except KeyboardInterrupt:
             return
 
@@ -172,6 +174,22 @@ class AgentNotificationParser:
         s.sendto(sent_msg, (self.server_addr, self.server_port))
 
 
+    @staticmethod
+    def encode(message, msg_type, fields, module):
+        """Encodes the message into the internal format (JSON)"""
+        message_obj = dict()
+        message_obj[AgentFields.message] = message
+        message_obj[AgentFields.message_type] = msg_type
+        message_obj[AgentFields.timestamp] = time.time()
+        message_obj[AgentFields.monitoring_module] = module
+        message_obj[AgentFields.hostname] = socket.gethostname()
+        message_obj[AgentFields.module_fields] = dict()
+        for i in fields.keys():
+            message_obj[AgentFields.module_fields][i] = fields[i]
+
+        return json.dumps(message_obj)
+
+
 class CorruptAgentModule(CorruptInventoryModule):
 
     get_name = 2
@@ -182,3 +200,5 @@ class CorruptAgentModule(CorruptInventoryModule):
         if err_type == CorruptAgentModule.get_name:
             self.err_description = module_name + 'doesn\'t implement' +\
                     'the get_name() or it\'s return value is incorrect'
+
+

@@ -16,11 +16,14 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+import json
+import logging
 
 class ServerModule:
     """The interface for a generic ServerModule."""
 
     def __init__(self, configs, shell):
+        logging.info('Initializing module %s', self.get_name())
         self.configs = configs
         self.shell = shell
 
@@ -32,6 +35,9 @@ class ServerModule:
         module_options = self.configs.items(self.get_name())
         for option in module_options:
             self.options[option[0]] = option[1]
+
+        logging.info('Initialized module %s with options:\n%s', self.get_name(),\
+                     json.dumps(self.options, sort_keys=True, indent=4))
 
 
     def get_name(self):

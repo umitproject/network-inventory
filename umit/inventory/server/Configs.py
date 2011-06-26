@@ -17,7 +17,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import os
-from umit.inventory.common import InventoryConfig
+from umit.inventory.Configuration import InventoryConfig
 
 
 class ServerConfig(InventoryConfig):
@@ -42,7 +42,7 @@ class ServerConfig(InventoryConfig):
         # General settings
         self.set(InventoryConfig.general_section,\
                 ServerConfig.interface_port,\
-                ServerConfig.default_interface_port)
+                str(ServerConfig.default_interface_port))
 
         # Module default settings
         self.add_section('AgentListener')
@@ -56,9 +56,6 @@ class ServerConfig(InventoryConfig):
         self.set('SNMPListener', InventoryConfig.module_enabled, False)
 
         self.add_section('Database')
-        self.set('Database', InventoryConfig.module_path,\
-                os.path.join('umit', 'inventory', 'server'))
-        self.set('Database', InventoryConfig.module_enabled, True)
 
 
     def _set_default_config_file(self):

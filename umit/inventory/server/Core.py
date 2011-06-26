@@ -16,8 +16,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-import traceback
-import json
+import logging
 
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.server.Module import ListenerServerModule
@@ -25,7 +24,6 @@ from umit.inventory.server.Module import SubscriberServerModule
 from umit.inventory.server.Database import Database
 from umit.inventory.common import CorruptInventoryModule
 import umit.inventory.common
-from umit.inventory.server.Notification import Notification
 
 from twisted.internet import reactor
 
@@ -33,19 +31,36 @@ from twisted.internet import reactor
 class ServerCore:
 
     def __init__(self, configs):
+        logging.info('Initializing ServerCore ...')
+
+        self.initialized = True
         self.configs = configs
-        self.database = Database(configs)
+        try:
+            self.database = Database(configs)
+        except:
+            logging.critical('Failed to initialize ServerCore. Shutting down.',\
+                             exc_info=True)
+            self.initialized = False
+            return
+        
+        if self.database.database is None:
+            logging.critical('Failed to initialize ServerCore. Shutting down.')
+            self.initialized = False
+            return
         self.shell = ServerShell(self)
         self.database.shell = self.shell
 
         self.modules = []
         self._load_modules()
 
+        logging.info('Initialized ServerCore')
+
 
     def _load_modules(self):
         # Loads the modules as defined in the configuration file
         modules_names = self.configs.get_modules_list()
 
+        logging.info('Loading modules ...')
         for module_name in modules_names:
             if not self.configs.module_get_enable(module_name):
                 continue
@@ -66,15 +81,19 @@ class ServerCore:
                             CorruptServerModule.get_name)
 
             except Exception, e:
-                traceback.print_exc()
+                logging.error('Failed loading module %s',\
+                              module_obj.get_name(), exc_info=True)
                 continue
             self.modules.append(module_obj)
-
+        logging.info('Loaded modules')
+        
         # Init subscriptions. This is done now because all modules must be
         # loaded and initialized before the subscribtions are done.
+        logging.info('Initializing modules subscriptions ...')
         for module in self.modules:
             if isinstance(module, SubscriberServerModule):
                 module.subscribe()
+        logging.info('Initialized modules subscriptions.')
 
         # Init the database operations for each module.
         for module in self.modules:
@@ -82,13 +101,16 @@ class ServerCore:
 
 
     def run(self):
-        """ The server main loop. """
+        if not self.initialized:
+            return
+
         # Call the modules which implement ListenerServerModule so they
         # will start listening.
         for module in self.modules:
             if isinstance(module, ListenerServerModule):
                 module.listen()
 
+        logging.info('Starting the Twisted Reactor')
         reactor.run()
 
 
@@ -118,6 +140,7 @@ class ServerShell:
         self._core = core
         self.database = self._core.database
         self._subscriptions = dict()
+        logging.info('Initialized ServerShell ...')
 
 
     def get_modules_list(self):
@@ -152,12 +175,16 @@ class ServerShell:
                     self._subscriptions[module_name] = []
 
                 self._subscriptions[module_name].append(subscriber)
+            logging.info('Module %s subscribed to all listener modules',\
+                         subscriber.get_name())
             return
 
         # Similar to above. First subscriber to subscribe to this module.
-        if listener_name not in self.subscriptions.keys():
-            self._subscriptions[listener_name]
+        if listener_name not in self._subscriptions.keys():
+            self._subscriptions[listener_name] = [subscriber]
         self._subscriptions[listener_name].append(subscriber)
+        logging.info('Module %s subscribed to %s', subscriber.get_name(),\
+                     listener_name)
 
 
     def parse_notification(self, listener_name, notification):
@@ -165,7 +192,7 @@ class ServerShell:
         Called by the ListenerServerModule objects after they received
         a notification. All the modules which subscribed will have the
         receive_notification() method called with notification as
-        argumment.
+        argument.
 
         listener_name: The name of the listener module which received the
         notification.
@@ -184,10 +211,10 @@ class ServerShell:
             module.receive_notification(notification)
 
 
-    class InvalidSubscriber(Exception):
+class InvalidSubscriber(Exception):
 
-        def __init__(self, subscriber):
-            self.err_msg = str(subscriber)
+    def __init__(self, subscriber):
+        self.err_msg = str(subscriber)
 
-        def __str__(self):
-            return repr(self.err_msg)
+    def __str__(self):
+        return repr(self.err_msg)

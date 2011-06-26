@@ -20,7 +20,7 @@ import logging
 import time
 import os
 
-from umit.inventory.common import InventoryConfig
+from umit.inventory.Configuration import InventoryConfig
 
 def init_logger(configs, l=logging.WARNING, log_to_console=False):
     """

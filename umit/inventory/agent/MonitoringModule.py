@@ -20,7 +20,7 @@ from threading import Thread
 import logging
 import json
 
-from umit.inventory.common import AgentNotificationParser
+from umit.inventory.agent.Core import AgentNotificationParser
 
 
 class MonitoringModule(Thread):
@@ -67,7 +67,7 @@ class MonitoringModule(Thread):
         msg_type: The type of the message. See umit.inventory.common
         fields: A dictionary with the module specific fields.
         """
-        notification = AgentNotificationParser.parse(message, msg_type,\
+        notification = AgentNotificationParser.encode(message, msg_type,\
                 fields, self.get_name())
         self.agent_main_loop.add_message(notification)
 

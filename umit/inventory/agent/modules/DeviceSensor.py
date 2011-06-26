@@ -24,7 +24,6 @@ import datetime
 import json
 import re
 import psutil
-import traceback
 import logging
 from socket import gethostname
 from collections import deque
@@ -488,7 +487,7 @@ class TrackersManager:
         else:
             info_str = 'Loaded report with the following pre-formated body:\n'
             info_str += notif_msg
-            info_str += 'Reporting each %f seconds' % cooldown
+            info_str += '\nReporting each %f seconds' % cooldown
             logging.info(info_str)
 
         # Return the initialized tracker
@@ -788,7 +787,6 @@ class DeviceValueTracker:
 
 
     def _apply_modifiers(self, var_value, var_modifier):
-        print '%s has modifier %s' % (str(var_value), str(var_modifier))
         if var_modifier is None or (type(var_modifier) != int and\
                 type(var_modifier) != float):
             if type(var_value) == float:

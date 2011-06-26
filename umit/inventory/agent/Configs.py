@@ -17,7 +17,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import os
-from umit.inventory.common import InventoryConfig
+from umit.inventory.Configuration import InventoryConfig
 
 
 class AgentConfig(InventoryConfig):
@@ -26,6 +26,7 @@ class AgentConfig(InventoryConfig):
     default_server_addr = '127.0.0.1'
     default_server_port = '20000'
     default_encrypt_enabled = False
+    default_polling_time = 2.0
 
     file_path = os.path.join('umit', 'inventory', 'agent', 'umit_agent.conf')
 
@@ -33,6 +34,7 @@ class AgentConfig(InventoryConfig):
     server_addr = 'server_address'
     encrypt_enabled = 'encryption_enabled'
     server_port = 'server_port'
+    polling_time = 'polling_time_interval'
 
     def _set_default_settings(self):
         """Load default fail-save settings"""
@@ -40,11 +42,13 @@ class AgentConfig(InventoryConfig):
         
         # General settings
         self.set(InventoryConfig.general_section, AgentConfig.encrypt_enabled,\
-                AgentConfig.default_encrypt_enabled)
+                str(AgentConfig.default_encrypt_enabled))
         self.set(InventoryConfig.general_section, AgentConfig.server_addr,\
-                AgentConfig.default_server_addr)
+                str(AgentConfig.default_server_addr))
         self.set(InventoryConfig.general_section, AgentConfig.server_port,\
-                AgentConfig.default_server_port)
+                str(AgentConfig.default_server_port))
+        self.set(InventoryConfig.general_section, AgentConfig.polling_time,\
+                str(AgentConfig.default_polling_time))
 
         # Module default settings
         self.add_section('DeviceSensor')
