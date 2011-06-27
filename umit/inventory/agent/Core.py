@@ -58,6 +58,12 @@ class AgentMainLoop:
         self.polling_time =\
                 float(self.conf.get_general_option(AgentConfig.polling_time))
 
+        # Authentication options
+        self.auth_enabled =\
+            configurations.get_general_option(AgentConfig.auth_enabled)
+        self.username = configurations.get_general_option(AgentConfig.username)
+        self.password = configurations.get_general_option(AgentConfig.password)
+
 
     def _parse_messages(self):
         """Parses each message in the self.parsing_message_queue"""
@@ -149,6 +155,10 @@ class AgentMainLoop:
 class AgentNotificationParser:
     """ Will send the notifications to the Notifications Server """
 
+    username = ''
+    password = ''
+    auth_enabled = False
+
     def __init__(self, configs):
         """
         The message parser should parse the messages and send them to the
@@ -166,6 +176,13 @@ class AgentNotificationParser:
             configs.get_general_option(AgentConfig.max_notification_queue_size)
         self.max_queue_size = int(self.max_queue_size)
 
+        # Authentication options
+        AgentNotificationParser.auth_enabled =\
+            configs.get_general_option(AgentConfig.auth_enabled)
+        AgentNotificationParser.username =\
+            configs.get_general_option(AgentConfig.username)
+        AgentNotificationParser.password =\
+            configs.get_general_option(AgentConfig.password)
 
 
     def parse(self, message):
@@ -256,6 +273,11 @@ class AgentNotificationParser:
         message_obj[AgentFields.module_fields] = dict()
         for i in fields.keys():
             message_obj[AgentFields.module_fields][i] = fields[i]
+
+        # Optional authentication fields
+        if AgentNotificationParser.auth_enabled:
+            message_obj[AgentFields.username] = AgentNotificationParser.username
+            message_obj[AgentFields.password] = AgentNotificationParser.password
 
         return json.dumps(message_obj)
 

@@ -39,6 +39,9 @@ class AgentFields:
     monitoring_module = 'monitoring_module'
     module_fields = 'module_fields'
 
+    # Optional: Only if authentication is enabled.
+    username = 'username'
+    password = 'password'
 
 
 def load_module(module_name, module_path, *module_args):

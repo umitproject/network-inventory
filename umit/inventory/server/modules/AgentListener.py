@@ -37,14 +37,23 @@ import json
 import tempfile
 from copy import copy
 import os
+import hashlib
 
 
 class AgentListener(ListenerServerModule, ServerModule):
+
+    # User System database collection name
+    collection_name = 'agent_listener_users'
+
+    # User System collection fields
+    db_username = 'username'
+    db_md5_pass = 'md5_pass'
 
     # Options
     udp_port_option = 'listening_udp_port'
     ssl_port_option = 'listening_ssl_port'
     ssl_auth_enabled = 'ssl_authentication_enabled'
+    udp_auth_enabled = 'udp_authentication_enabled'
 
     # SSL expire: 10 years
     cert_expire = 316224000
@@ -60,6 +69,7 @@ class AgentListener(ListenerServerModule, ServerModule):
         self.udp_port = int(self.options[AgentListener.udp_port_option])
         self.ssl_port = int(self.options[AgentListener.ssl_port_option])
         self.ssl_auth = bool(self.options[AgentListener.ssl_auth_enabled])
+        self.udp_auth = bool(self.options[AgentListener.udp_auth_enabled])
 
         # Generate the SSL key and certificate
         logging.info('AgentListener: Loading SSL support ...')
@@ -71,6 +81,9 @@ class AgentListener(ListenerServerModule, ServerModule):
                           exc_info=True)
             self.ssl_enabled = False
         logging.info('AgentListener: Loaded SSL support')
+
+        # The users used for authentication if enabled
+        self.users = {}
 
 
     def _generate_ssl_files(self):
@@ -105,18 +118,47 @@ class AgentListener(ListenerServerModule, ServerModule):
         return 'UmitAgent'
 
 
+    def init_database_operations(self):
+        # Construct the users dictionary with entries (username: md5_pass)
+        # used to authenticate notifications if this is enabled.
+        db_entries = self.shell.database.find(AgentListener.collection_name)
+        for user_entry in db_entries:
+            try:
+                username = user_entry[AgentListener.db_username]
+                md5_pass = user_entry[AgentListener.db_md5_pass]
+            except:
+                logging.error('Agent Listener: Invalid user entry in database.',\
+                              exc_info=True)
+                continue
+            self.users[username] = md5_pass
+
+        # TODO: delete this after testing is done:
+        if 'guest' not in self.users.keys():
+            guest_pass = hashlib.md5('guest').hexdigest()
+            self.users['guest'] = guest_pass
+            self.shell.database.insert(AgentListener.collection_name,\
+                {'username' : 'guest', 'md5_pass' : guest_pass})
+
+
     def init_default_settings(self):
         self.options[AgentListener.udp_port_option] = '20000'
         self.options[AgentListener.ssl_port_option] = '20001'
-        self.options[AgentListener.ssl_auth_enabled] = False
+        self.options[AgentListener.ssl_auth_enabled] = True
+        self.options[AgentListener.udp_auth_enabled] = False
 
 
-    def receive_message(self, host, port, data):
+    def receive_message(self, host, port, data, authenticate):
         try:
             temp = json.loads(data)
         except:
             logging.error('AgentListener: non-seriazable JSON notification.',\
                           exc_info=True)
+            return
+
+        # If we have authentication enabled, test it
+        if authenticate and not self.authenticate_notification(temp):
+            logging.warning('AgentListener: Authentication Failure from %s:%s',\
+                            str(host), str(port))
             return
 
         # Must be careful, as it may be invalid and not contain all the fields.
@@ -172,6 +214,44 @@ class AgentListener(ListenerServerModule, ServerModule):
             logging.error(error_msg, exc_info=True)
 
 
+    def authenticate_notification(self, notification):
+        # Get the username and password from the notification
+
+        # Make sure it has the fields
+        try:
+            username = notification[AgentFields.username]
+            password = notification[AgentFields.password]
+        except:
+            err_msg = 'AgentListener: Authentication Error. Received '
+            err_msg += 'notification missing username, password or both'
+            logging.error(err_msg, exc_info=True)
+            return False
+
+        # Compute the password digest
+        md5_pass = hashlib.md5(password).hexdigest()
+
+        # Verify we have the user in the database
+        if not username in self.users.keys():
+            err_msg = 'AgentListener: Authentication Error. Received '
+            err_msg += 'notification from user %s, but user is missing'
+            err_msg += ' from database'
+            logging.error(err_msg, username)
+            return False
+
+        # Verify the password is correct
+        if md5_pass != self.users[username]:
+            err_msg = 'AgentListener: Authentication Error. Received '
+            err_msg += 'notification from user %s, but password is invalid'
+            logging.error(err_msg, username)
+            return False
+
+        logging.debug('AgentListener: Authentication successful from %s',
+                      notification[NotificationFields.hostname])
+        return True
+
+
+
+
     def listen(self):
         # Listen on UDP port
         logging.info('AgentListener: Trying to listen UDP on port %s',\
@@ -184,9 +264,11 @@ class AgentListener(ListenerServerModule, ServerModule):
             logging.error('AgentListener: Failed to listen UDP on port %s',\
                           str(self.udp_port))
 
-        # Listen on SSL port
+        # Make sure we have enabled SSL
         if not self.ssl_enabled:
             return
+
+        # Listen on SSL port
         ssl_factory = Factory()
         AgentSSLProtocol.agent_listener = self
         ssl_factory.protocol = AgentSSLProtocol
@@ -212,7 +294,8 @@ class AgentDatagramProtocol(DatagramProtocol):
 
 
     def datagramReceived(self, data, (host, port)):
-        self.agent_listener.receive_message(host, port, data)
+        self.agent_listener.receive_message(host, port, data,\
+                                            self.agent_listener.udp_auth)
 
 
 
@@ -235,7 +318,8 @@ class AgentSSLProtocol(Protocol):
             # TODO review this with support for IPv6
             host = peer.host
             port = peer.port
-        self.agent_listener.receive_message(host, port, data)
+        self.agent_listener.receive_message(host, port, data,\
+                                            self.auth_enabled)
 
 
 class AgentNotification(Notification):
@@ -267,3 +351,4 @@ class AgentNotificationFields(NotificationFields):
     @staticmethod
     def get_types():
         return AgentNotificationFields.types
+

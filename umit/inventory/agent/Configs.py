@@ -28,6 +28,9 @@ class AgentConfig(InventoryConfig):
     default_ssl_enabled = False
     default_polling_time = 2.0
     default_max_notification_queue_size = 1000
+    default_auth_enabled = False
+    default_username = 'guest'
+    default_password = 'guest'
 
     file_path = os.path.join('umit', 'inventory', 'agent', 'umit_agent.conf')
 
@@ -37,6 +40,9 @@ class AgentConfig(InventoryConfig):
     server_port = 'server_port'
     polling_time = 'polling_time_interval'
     max_notification_queue_size = 'max_notification_queue_size'
+    auth_enabled = 'authentication_enabled'
+    username = 'username'
+    password = 'password'
 
 
     def _set_default_settings(self):
@@ -55,6 +61,12 @@ class AgentConfig(InventoryConfig):
                  str(AgentConfig.default_max_notification_queue_size))
         self.set(InventoryConfig.general_section, AgentConfig.polling_time,\
                  str(AgentConfig.default_polling_time))
+        self.set(InventoryConfig.general_section, AgentConfig.auth_enabled,\
+                 str(AgentConfig.default_auth_enabled))
+        self.set(InventoryConfig.general_section, AgentConfig.username,\
+                 str(AgentConfig.default_username))
+        self.set(InventoryConfig.general_section, AgentConfig.password,\
+                 str(AgentConfig.default_password))
 
         # Module default settings
         self.add_section('DeviceSensor')
