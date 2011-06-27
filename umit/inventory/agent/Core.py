@@ -21,6 +21,8 @@ import socket
 import logging
 import json
 import time
+import ssl
+from collections import deque
 
 from umit.inventory.agent.Configs import AgentConfig
 from umit.inventory.common import CorruptInventoryModule
@@ -49,6 +51,9 @@ class AgentMainLoop:
         self.modules = []
         self.conf = configurations
 
+        # If we should shut-down
+        self.shutdown = False
+
         # Get the polling time for the loop
         self.polling_time =\
                 float(self.conf.get_general_option(AgentConfig.polling_time))
@@ -57,7 +62,9 @@ class AgentMainLoop:
     def _parse_messages(self):
         """Parses each message in the self.parsing_message_queue"""
         for message in self.parsing_message_queue:
-            self.message_parser.parse(message)
+            # Method returns False in case of a fatal error
+            if not self.message_parser.parse(message):
+                self.shutdown = True
 
 
     def add_message(self, message):
@@ -119,6 +126,9 @@ class AgentMainLoop:
             # The actual main loop
             logging.info('Starting the Agent Main Loop')
             while True:
+                if self.shutdown:
+                    logging.info('Shutting down ...')
+                    break
                 self.added_message_queue_lock.acquire()
                 if self.received_messages:
                     self.parsing_message_queue = self.added_message_queue
@@ -137,41 +147,101 @@ class AgentMainLoop:
 
 
 class AgentNotificationParser:
+    """ Will send the notifications to the Notifications Server """
 
     def __init__(self, configs):
         """
         The message parser should parse the messages and send them to the
         Notifications Server which is specified in the Configurations.
-        It also offers the option to encrypt the messages if specified.
+        It also offers the option to encrypt the messages if specified trough
+        SSL.
         """
         self.server_addr = configs.get_general_option(AgentConfig.server_addr)
         self.server_port = configs.get_general_option(AgentConfig.server_port)
         self.server_port = int(self.server_port)
-        self.encrypt_enabled =\
-                configs.get_general_option(AgentConfig.encrypt_enabled)
+        self.ssl_enabled = configs.get_general_option(AgentConfig.ssl_enabled)
 
+        self.notification_queue = deque()
+        self.max_queue_size =\
+            configs.get_general_option(AgentConfig.max_notification_queue_size)
+        self.max_queue_size = int(self.max_queue_size)
 
-    def _encrypt(self, message):
-        # Encrypts the message. TODO
-        return message
 
 
     def parse(self, message):
         """
-        Encrypts the message if specified and then send it to the Notifications
-        Server.
-        """
-        if self.encrypt_enabled:
-            sent_msg = self._encrypt(message)
-        else:
-            sent_msg = message
+        Sends the notification to the Notifications Server. If configured, it
+        will use a SSL connection to send it.
 
-        logging.debug('Sending message to %s:%d. Actual message:\n%s',\
+        Returns False if a fatal error is encountered.
+        """
+        logging.debug('Trying to send notification to %s:%d:\n%s',\
                 self.server_addr, self.server_port, message)
 
-        # Send the message trough UDP
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.sendto(sent_msg, (self.server_addr, self.server_port))
+        # Send trough SSL
+        if self.ssl_enabled:
+            s = socket.socket()
+            try:
+                s = ssl.wrap_socket(s)
+            except:
+                logging.critical('Missing SSL support. Install OpenSSL.')
+                return False
+
+            # Connecting to the Notifications Server
+            try:
+                s.connect((self.server_addr, self.server_port))
+            except:
+                error_msg = 'Failed to connect to Server at %s:%s. '
+                error_msg += 'Trying to send notification later:\n %s'
+                logging.error(error_msg, self.server_addr, self.server_port,\
+                              message, exc_info=True)
+
+                # Storing the notification to the queue to try later to send it
+                self.notification_queue.appendleft(message)
+
+                # If we reached the maximum limit of the queue, we shut down
+                if len(self.notification_queue) == self.max_queue_size:
+                    logging.critical('Max notification queue size (%d) reached',\
+                                     self.max_queue_size)
+                    return False
+                return True
+
+            # Successfully connected. Sending message.
+            s.send(message)
+            s.close()
+
+            # If we got here, the Server is running so we can try to send
+            # the notifications we have in the queue (if any)
+            self.send_notifications_from_queue()
+            return True
+        # Send trough UDP
+        else:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.sendto(message, (self.server_addr, self.server_port))
+
+
+    def send_notifications_from_queue(self):
+        """ Tries to send the notifications which are present in the queue """
+        if len(self.notification_queue) is 0:
+            return
+
+        sent_items = 0
+        while len(self.notification_queue) > 0:
+            print sent_items
+            initial_size = len(self.notification_queue)
+            print initial_size
+            # Trying to send the notification
+            notification = self.notification_queue.pop()
+            self.parse(notification)
+
+            # If it returned to the queue, we failed.
+            if initial_size == len(self.notification_queue):
+                break
+            sent_items += 1
+
+        if sent_items is not 0:
+            logging.info('Sent %d notifications from the queue.',\
+                         sent_items)
 
 
     @staticmethod
@@ -200,5 +270,3 @@ class CorruptAgentModule(CorruptInventoryModule):
         if err_type == CorruptAgentModule.get_name:
             self.err_description = module_name + 'doesn\'t implement' +\
                     'the get_name() or it\'s return value is incorrect'
-
-

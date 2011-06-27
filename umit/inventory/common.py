@@ -16,6 +16,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+import logging
 
 class NotificationTypes:
 
@@ -55,6 +56,7 @@ def load_module(module_name, module_path, *module_args):
         module_mod = __import__(modname, globals(),\
                 locals(), [module_name], -1)
     except Exception, e:
+        logging.error('Corrupt module:', exc_info=True)
         raise CorruptInventoryModule(module_name, module_path,\
                 CorruptInventoryModule.corrupt_path)
 

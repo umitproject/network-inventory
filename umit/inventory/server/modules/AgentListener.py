@@ -16,6 +16,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+from OpenSSL import crypto
 
 from umit.inventory.server.Module import ListenerServerModule
 from umit.inventory.server.Module import ServerModule
@@ -25,11 +26,17 @@ from umit.inventory.common import AgentFields
 
 from twisted.internet import reactor
 from twisted.internet.protocol import DatagramProtocol
+from twisted.internet import ssl
+from twisted.internet.protocol import Factory
+from twisted.internet.protocol import Protocol
+from twisted.internet.address import IPv4Address
 
 import socket
-import traceback
+import logging
 import json
+import tempfile
 from copy import copy
+import os
 
 
 class AgentListener(ListenerServerModule, ServerModule):
@@ -37,6 +44,14 @@ class AgentListener(ListenerServerModule, ServerModule):
     # Options
     udp_port_option = 'listening_udp_port'
     ssl_port_option = 'listening_ssl_port'
+    ssl_auth_enabled = 'ssl_authentication_enabled'
+
+    # SSL expire: 10 years
+    cert_expire = 316224000
+
+    # SSL files
+    cert_file_name = os.path.join(tempfile.gettempdir(), 'umit_agent.cert')
+    key_file_name = os.path.join(tempfile.gettempdir(), 'umit_agent.key')
 
 
     def __init__(self, configs, shell):
@@ -44,6 +59,42 @@ class AgentListener(ListenerServerModule, ServerModule):
 
         self.udp_port = int(self.options[AgentListener.udp_port_option])
         self.ssl_port = int(self.options[AgentListener.ssl_port_option])
+        self.ssl_auth = bool(self.options[AgentListener.ssl_auth_enabled])
+
+        # Generate the SSL key and certificate
+        logging.info('AgentListener: Loading SSL support ...')
+        self.ssl_enabled = True
+        try:
+            self._generate_ssl_files()
+        except:
+            logging.error('AgentListener: Failed to load SSL support.',\
+                          exc_info=True)
+            self.ssl_enabled = False
+        logging.info('AgentListener: Loaded SSL support')
+
+
+    def _generate_ssl_files(self):
+        # Certificate and key files only for this session
+        key_file = open(self.key_file_name, 'w')
+        cert_file = open(self.cert_file_name, 'w')
+
+        # Generate the key
+        key = crypto.PKey()
+        key.generate_key(crypto.TYPE_RSA, 1024)
+
+        # Generate the certificate
+        cert = crypto.X509()
+        cert.gmtime_adj_notBefore(0)
+        cert.gmtime_adj_notAfter(AgentListener.cert_expire)
+        cert.set_issuer(cert.get_subject())
+        cert.set_pubkey(key)
+        cert.sign(key, 'sha1')
+
+        # Write to files
+        cert_file.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+        key_file.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, key))
+        key_file.close()
+        cert_file.close()
 
 
     def get_name(self):
@@ -57,14 +108,16 @@ class AgentListener(ListenerServerModule, ServerModule):
     def init_default_settings(self):
         self.options[AgentListener.udp_port_option] = '20000'
         self.options[AgentListener.ssl_port_option] = '20001'
+        self.options[AgentListener.ssl_auth_enabled] = False
 
 
     def receive_message(self, host, port, data):
         try:
             temp = json.loads(data)
-        except Exception, e:
-            traceback.print_exc()
-            # TODO: Log this
+        except:
+            logging.error('AgentListener: non-seriazable JSON notification.',\
+                          exc_info=True)
+            return
 
         # Must be careful, as it may be invalid and not contain all the fields.
         fields = dict()
@@ -102,31 +155,57 @@ class AgentListener(ListenerServerModule, ServerModule):
             fields[AgentNotificationFields.monitoring_module] =\
                     unicode(temp[AgentFields.monitoring_module])
 
-            # TODO decide how to do add the dynamic fields to the
-            # AgentNotificationFields definitions.
             for module_field in temp[AgentFields.module_fields].keys():
                 fields[module_field] =\
                         temp[AgentFields.module_fields][module_field]
         except Exception, e:
-            traceback.prin_exc()
-            # TODO: Log this
+            logging.error('AgentListener: Failed to get notification fields',\
+                          exc_info=True)
+            return
 
         try:
             notification = AgentNotification(fields)
             self.shell.parse_notification(self.get_name(), notification)
         except Exception, e:
-            traceback.print_exc()
-            # TODO: Log this
+            error_msg = 'AgentListener: Failed to convert notification to '
+            error_msg += 'internal AgentNotification object.'
+            logging.error(error_msg, exc_info=True)
 
 
     def listen(self):
-        reactor.listenUDP(self.udp_port, AgentDatagramProtocol(self))
-        # TODO: listen SSL
+        # Listen on UDP port
+        logging.info('AgentListener: Trying to listen UDP on port %s',\
+                     str(self.udp_port))
+        try:
+            reactor.listenUDP(self.udp_port, AgentDatagramProtocol(self))
+            logging.info('AgentListener: Listening UDP on port %s',\
+                         str(self.udp_port))
+        except:
+            logging.error('AgentListener: Failed to listen UDP on port %s',\
+                          str(self.udp_port))
+
+        # Listen on SSL port
+        if not self.ssl_enabled:
+            return
+        ssl_factory = Factory()
+        AgentSSLProtocol.agent_listener = self
+        ssl_factory.protocol = AgentSSLProtocol
+        ssl_context_factory = ssl.DefaultOpenSSLContextFactory(\
+            self.key_file_name, self.cert_file_name)
+        logging.info('AgentListener: Trying to listen SSL on port %s',\
+                     str(self.ssl_port))
+        try:
+            reactor.listenSSL(self.ssl_port, ssl_factory, ssl_context_factory)
+            logging.info('AgentListener: Listening SSL on port %s',\
+                         str(self.ssl_port))
+        except:
+            logging.error('AgentListener: Failed to listen SSL on port %s',\
+                          str(self.ssl_port))
 
 
 
 class AgentDatagramProtocol(DatagramProtocol):
-    """ The protocol used when receiving messages from the Agents """
+    """ The protocol used when receiving messages from the Agents on UDP """
 
     def __init__(self, agent_listener):
         self.agent_listener = agent_listener
@@ -135,6 +214,28 @@ class AgentDatagramProtocol(DatagramProtocol):
     def datagramReceived(self, data, (host, port)):
         self.agent_listener.receive_message(host, port, data)
 
+
+
+class AgentSSLProtocol(Protocol):
+    """ The protocol used when receiving messages from the Agents on SSL """
+
+    agent_listener = None
+
+    def __init__(self):
+        self.agent_listener = AgentSSLProtocol.agent_listener
+        self.auth_enabled = self.agent_listener.ssl_auth
+        self.shell = self.agent_listener.shell
+
+
+    def dataReceived(self, data):
+        peer = self.transport.getPeer()
+        host = ''
+        port = -1
+        if isinstance(peer, IPv4Address):
+            # TODO review this with support for IPv6
+            host = peer.host
+            port = peer.port
+        self.agent_listener.receive_message(host, port, data)
 
 
 class AgentNotification(Notification):

@@ -82,7 +82,7 @@ class ServerCore:
 
             except Exception, e:
                 logging.error('Failed loading module %s',\
-                              module_obj.get_name(), exc_info=True)
+                              module_name, exc_info=True)
                 continue
             self.modules.append(module_obj)
         logging.info('Loaded modules')

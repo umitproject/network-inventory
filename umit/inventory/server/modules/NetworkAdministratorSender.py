@@ -19,7 +19,6 @@
 from umit.inventory.server.Module import SubscriberServerModule
 from umit.inventory.server.Module import ServerModule
 
-import traceback
 import json
 import httplib
 import urllib
@@ -137,8 +136,6 @@ class NotificationQueueDispatcher(Thread):
 
         conn = httplib.HTTPConnection(self.host)
 
-        # TODO send the notifications
-        print self.queue
         sent_message = json.dumps(self.queue)
         auth_string = get_auth_string(self.username, self.password)
         headers = {'Authorization' : auth_string}
@@ -146,13 +143,7 @@ class NotificationQueueDispatcher(Thread):
         params = urllib.urlencode(sent_dict)
         conn.request("POST", "/api/event/report/", params, headers)
         response = conn.getresponse()
-        print response.status
-        print response.reason
-        print response.msg
-        print response.getheaders()
-        print response.read()
-        print 'sending %d %f' % (len(self.queue), time.time())
-        
+
         conn.close()
         
         self.queue = []
