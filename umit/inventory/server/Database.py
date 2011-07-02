@@ -142,7 +142,7 @@ class Database:
 
 
     def find(self, collection_name, search_spec=None, returned_fields=None,\
-            sorted_fields=None):
+            sorted_fields=None, tailable=False):
         """
         Searches the database.
         search_spec: A dictionary with entries field_name : field_value to
@@ -151,6 +151,8 @@ class Database:
         results.
         sorted_fields: A list of (field_name, direction) to sort the results.
         direction should be True for ascending sort and False for descending.
+        tailable: See MongoDB tailable option for the find method. Will return
+        a tailable cursor.
         """
         if sorted_fields is not None:
             for entry in sorted_fields:
@@ -158,7 +160,42 @@ class Database:
                            pymongo.DESCENDING
 
         return self.database[collection_name].find(spec=search_spec,\
-                fields=returned_fields, sort=sorted_fields)
+                fields=returned_fields, sort=sorted_fields, tailable=tailable)
+
+
+    def update(self, collection_name, spec_fields, updated_fields):
+        """
+        Updates a document (or more) in the given collection.
+        spec_fields: A dict specifying the values for the fields to match
+        the documents to be updated.
+        updated_fields: A dict with the new values for the fields specified
+        as keys.
+        """
+        self.database[collection_name].update(spec_fields, updated_fields)
+
+
+    def remove(self, collection_name, spec_fields=None):
+        """
+        Removes a document (or more) from the given collection.
+        spec_fields: A dict specifying the values for the fields to match
+        the documents to be removed. If None, all the documents from the
+        collection will be removed.
+        """
+        self.database[collection_name].remove(spec_fields)
+
+
+    def ensure_index(self, collection_name, key_or_list, unique_key=False,\
+                     background_exec=False):
+        """
+        Ensures an index on a field or list of fields in the given collection.
+        key_or_list: A key or a list of keys that should be indexed.
+        unique_key: If the index should provide uniqueness for the key.
+        background_exec: If the operation should be executed in background.
+        """
+        self.database[collection_name].ensure_index(key_or_list,\
+                                unique=unique_key, background=background_exec)
+
+
 
 
     # Private methods

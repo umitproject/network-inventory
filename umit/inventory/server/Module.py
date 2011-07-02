@@ -67,10 +67,24 @@ class ServerModule:
         pass
 
 
+    def evaluate_request(self, request, interface_connection):
+        """
+        Called when the Module receives a request trough the ServerInterface.
+        request: The request received trough the ServerInterface. See
+        umit.inventory.server.ServerInterface.RequestFields for details.
+        interface_connection: The connection on which the module must send
+        his response. See umit.inventory.ServerInterface.InterfaceConnection
+        for details.
+        Should be implemented.
+        """
+        pass
+
+
     def shutdown(self):
         """
         Called when the Server is shutting down. The module should do
         any needed operations for closing down in this method.
+        Should be implemented.
         """
         pass
 
@@ -97,7 +111,7 @@ class ListenerServerModule:
         twisted reactor for all ports he wants to listen to.
         Should be implemented.
         """
-        raise ServerModule.NotImplemented('listen')
+        pass
 
 
     def get_protocol_name(self):

@@ -50,7 +50,7 @@ class ServerCore:
         self.shell = ServerShell(self)
         self.database.shell = self.shell
 
-        self.modules = []
+        self.modules = {}
         self._load_modules()
 
         logging.info('Initialized ServerCore')
@@ -84,19 +84,19 @@ class ServerCore:
                 logging.error('Failed loading module %s',\
                               module_name, exc_info=True)
                 continue
-            self.modules.append(module_obj)
+            self.modules[module_name] = module_obj
         logging.info('Loaded modules')
         
         # Init subscriptions. This is done now because all modules must be
         # loaded and initialized before the subscribtions are done.
         logging.info('Initializing modules subscriptions ...')
-        for module in self.modules:
+        for module in self.modules.values():
             if isinstance(module, SubscriberServerModule):
                 module.subscribe()
         logging.info('Initialized modules subscriptions.')
 
         # Init the database operations for each module.
-        for module in self.modules:
+        for module in self.modules.values():
             module.init_database_operations()
 
 
@@ -106,7 +106,7 @@ class ServerCore:
 
         # Call the modules which implement ListenerServerModule so they
         # will start listening.
-        for module in self.modules:
+        for module in self.modules.values():
             if isinstance(module, ListenerServerModule):
                 module.listen()
 
@@ -145,7 +145,19 @@ class ServerShell:
 
     def get_modules_list(self):
         """ Returns the list with all the modules installed. """
-        return self._core.modules
+        return self._core.modules.values()
+
+
+    def get_modules_names_list(self):
+        """ Returns the list all the modules names installed. """
+        return self._core.modules.keys()
+
+
+    def get_module(self, module_name):
+        """ Returns the module with the given name or None """
+        if module_name in self._core.modules.keys():
+            return self._core.modules[module_name]
+        return None
 
 
     def subscribe(self, subscriber, listener_name='', subscribe_all=True):
@@ -163,7 +175,7 @@ class ServerShell:
             raise InvalidSubscriber(subscriber)
 
         if subscribe_all:
-            for module in self._core.modules:
+            for module in self._core.modules.values():
                 # Only interested in subscribing to listener modules.
                 if not isinstance(module, ListenerServerModule):
                     continue

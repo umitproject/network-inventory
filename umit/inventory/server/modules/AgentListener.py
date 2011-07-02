@@ -315,7 +315,7 @@ class AgentSSLProtocol(Protocol):
         host = ''
         port = -1
         if isinstance(peer, IPv4Address):
-            # TODO review this with support for IPv6
+            # TODO review this with support for IPv6 (Twisted support?)
             host = peer.host
             port = peer.port
         self.agent_listener.receive_message(host, port, data,\
