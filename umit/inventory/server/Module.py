@@ -67,13 +67,14 @@ class ServerModule:
         pass
 
 
-    def evaluate_request(self, request, interface_connection):
+    def evaluate_request(self, request, data_connection):
         """
         Called when the Module receives a request trough the ServerInterface.
         request: The request received trough the ServerInterface. See
+        umit.inventory.server.ServerInterface.Request and
         umit.inventory.server.ServerInterface.RequestFields for details.
         interface_connection: The connection on which the module must send
-        his response. See umit.inventory.ServerInterface.InterfaceConnection
+        his response. See umit.inventory.ServerInterface.InterfaceDataConnection
         for details.
         Should be implemented.
         """

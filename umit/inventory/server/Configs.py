@@ -26,10 +26,12 @@ class ServerConfig(InventoryConfig):
 
     # Default values
     default_interface_port = '30000'
+    default_force_interface_encrypt = False
 
     # General section options
     general_section = 'GeneralSection'
     interface_port = 'interface_port'
+    force_interface_encrypt = 'force_interface_encrypt'
 
     def get_core_modules(self):
         return ['Database']
@@ -43,7 +45,10 @@ class ServerConfig(InventoryConfig):
         self.set(InventoryConfig.general_section,\
                 ServerConfig.interface_port,\
                 str(ServerConfig.default_interface_port))
-
+        self.set(InventoryConfig.general_section,\
+                 ServerConfig.force_interface_encrypt,\
+                 str(ServerConfig.default_force_interface_encrypt))
+    
         # Module default settings
         self.add_section('AgentListener')
         self.set('AgentListener', InventoryConfig.module_path,\

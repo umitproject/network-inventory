@@ -18,6 +18,10 @@
 
 import logging
 
+# The message delimiter used for TCP communication
+message_delimiter = '\x00\x01\x02\x03'
+
+
 class NotificationTypes:
 
     info = "INFO"
@@ -42,6 +46,7 @@ class AgentFields:
     # Optional: Only if authentication is enabled.
     username = 'username'
     password = 'password'
+
 
 
 def load_module(module_name, module_path, *module_args):
@@ -107,5 +112,3 @@ class CorruptInventoryModule(Exception):
 
     def __str__(self):
         return repr(self.err_message + self.err_description)
-
-

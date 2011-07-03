@@ -30,6 +30,19 @@ class UserSystem:
         self.database = database
         self.users = dict()
 
+        users_temp = self.database.find(UserSystem.collection_name)
+        for user in users_temp:
+            self.users[user[User.username]] = User(user[User.username],\
+                    UserPermissions.deserialize(user[User.permissions]),\
+                    md5_password=user[User.md5_pass])
+
+
+    def get_user(self, username):
+        """ Returns the User object for the username or None """
+        if username in self.users:
+            return self.users[username]
+        return None
+
 
     def add_user(self, username, password, permissions):
         if username in self.users.keys():
@@ -93,6 +106,7 @@ class User:
     username = 'username'
     md5_pass = 'md5_pass'
     permissions = 'permissions'
+
 
     def __init__(self, username, permissions, md5_password=None, password=None):
         """
@@ -217,7 +231,7 @@ class UserPermissions:
 
 
     @staticmethod
-    def deserialize(self, db_obj):
+    def deserialize(db_obj):
         try:
             return UserPermissions(db_obj[UserPermissions.manage_users],\
                                    db_obj[UserPermissions.restart_server],\

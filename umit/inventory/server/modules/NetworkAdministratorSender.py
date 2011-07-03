@@ -147,7 +147,6 @@ class NotificationQueueDispatcher(Thread):
         conn.close()
         
         self.queue = []
-        self.queue_size = 0
         self.last_sent_time = time.time()
 
 

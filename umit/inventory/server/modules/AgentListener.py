@@ -23,12 +23,14 @@ from umit.inventory.server.Module import ServerModule
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 from umit.inventory.common import AgentFields
+from umit.inventory.common import message_delimiter
 
 from twisted.internet import reactor
 from twisted.internet.protocol import DatagramProtocol
 from twisted.internet import ssl
 from twisted.internet.protocol import Factory
 from twisted.internet.protocol import Protocol
+from twisted.protocols.basic import LineReceiver
 from twisted.internet.address import IPv4Address
 
 import socket
@@ -250,8 +252,6 @@ class AgentListener(ListenerServerModule, ServerModule):
         return True
 
 
-
-
     def listen(self):
         # Listen on UDP port
         logging.info('AgentListener: Trying to listen UDP on port %s',\
@@ -299,7 +299,7 @@ class AgentDatagramProtocol(DatagramProtocol):
 
 
 
-class AgentSSLProtocol(Protocol):
+class AgentSSLProtocol(LineReceiver):
     """ The protocol used when receiving messages from the Agents on SSL """
 
     agent_listener = None
@@ -308,9 +308,10 @@ class AgentSSLProtocol(Protocol):
         self.agent_listener = AgentSSLProtocol.agent_listener
         self.auth_enabled = self.agent_listener.ssl_auth
         self.shell = self.agent_listener.shell
+        self.delimiter = message_delimiter
 
 
-    def dataReceived(self, data):
+    def lineReceived(self, line):
         peer = self.transport.getPeer()
         host = ''
         port = -1
@@ -318,8 +319,10 @@ class AgentSSLProtocol(Protocol):
             # TODO review this with support for IPv6 (Twisted support?)
             host = peer.host
             port = peer.port
-        self.agent_listener.receive_message(host, port, data,\
+        self.agent_listener.receive_message(host, port, line,\
                                             self.auth_enabled)
+        self.transport.loseConnection()
+
 
 
 class AgentNotification(Notification):

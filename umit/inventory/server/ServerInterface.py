@@ -21,20 +21,26 @@ from OpenSSL import crypto
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 from umit.inventory.server.Configs import ServerConfig
+from umit.inventory.common import message_delimiter
+from umit.inventory.server.UserSystem import UserPermissions
 
 from twisted.internet import reactor
-from twisted.internet import ssl
 from twisted.internet.protocol import Factory
 from twisted.internet.protocol import Protocol
 from twisted.internet.address import IPv4Address
 
 import socket
 import logging
+import ssl
 import json
 import tempfile
-from copy import copy
+import time
 import os
-import hashlib
+import string
+from random import choice
+from threading import Thread
+from threading import Lock
+from collections import deque
 
 
 class ServerInterface:
@@ -42,6 +48,9 @@ class ServerInterface:
 
     # SSL certificate expiration: 10 years
     cert_expire = 316224000
+
+    # Token size for CONNECT requests
+    token_size = 512
 
     # SSL files
     cert_file_name = os.path.join(tempfile.gettempdir(),\
@@ -56,7 +65,79 @@ class ServerInterface:
         self.shell = shell
         self.requests_port =\
                 self.conf.get_general_option(ServerConfig.interface_port)
+        self.force_interface_encrypt =\
+                self.conf.get_general_option(ServerConfig.force_interface_encrypt)
 
+        # Dictionary mapping request types to their evaluating functions
+        self.request_eval_func = {\
+            'SUBSCRIBE' : self.evaluate_subscribe_request,\
+            'GET_MODULES' : self.evaluate_get_modules_request,\
+            'GET_CONFIGS' : self.evaluate_get_configs_request,\
+            'SET_CONFIGS' : self.evaluate_set_configs_request,\
+            'RESTART' : self.evaluate_restart_request,\
+            'SEARCH' : self.evaluate_search_request,\
+            'SEARCH_NEXT' : self.evaluate_search_next_request,\
+            'SEARCH_STOP' : self.evaluate_search_stop_request,\
+            'ADD_USER' : self.evaluate_add_user_request,\
+            'DEL_USER' : self.evaluate_del_user_request,\
+            'SET_USER' : self.evaluate_set_user_request,\
+            'GET_USERS' : self.evaluate_get_users_request\
+            }
+
+        # Dictionary mapping users to connections
+        self.users_connections = {}
+
+        # Users which are subscribed to notifications
+        self.subscribed_users = []
+
+
+    @staticmethod
+    def generate_token():
+        token = ''
+        for i in range(ServerInterface.token_size):
+            token += choice(string.digits + string.ascii_letters +\
+                            string.punctuation)
+        return token
+
+
+    @staticmethod
+    def build_auth_denied_response(req_id):
+        response = dict()
+        response[ResponseFields.request_id] = req_id
+        response[ResponseFields.response_code] = ResponseCodes.auth_denied
+        return response
+
+
+    @staticmethod
+    def build_missing_connection_response(req_id):
+        response = dict()
+        response[ResponseFields.request_id] = req_id
+        response[ResponseFields.response_code] = ResponseCodes.missing_connection
+        return response
+
+
+    @staticmethod
+    def build_invalid_response(req_id):
+        response = dict()
+        response[ResponseFields.request_id] = req_id
+        response[ResponseFields.response_code] = ResponseCodes.invalid
+        return response
+
+
+    @staticmethod
+    def build_missing_permissions_response(req_id):
+        response = dict()
+        response[ResponseFields.request_id] = req_id
+        response[ResponseFields.response_code] = ResponseCodes.missing_permissions
+        return response
+
+
+    @staticmethod
+    def build_accepted_response(req_id):
+        response = dict()
+        response[ResponseFields.request_id] = req_id
+        response[ResponseFields.response_code] = ResponseCodes.accepted
+        return response
 
 
     def _generate_ssl_files(self):
@@ -83,63 +164,158 @@ class ServerInterface:
         cert_file.close()
 
 
-    def get_connection(self, request):
+    def get_connection(self, username):
         """
-        Gets the connection for this request, or None if an 'AUTHENTICATE'
+        Gets the connection for this request, or None if an 'CONNECT'
         request was not sent prior to this one.
         """
-        # TODO
+        if username in self.users_connections.keys():
+            return self.users_connections[username]
         return None
 
 
-    def evaluate_general_request(self, request):
-        # TODO
+    def evaluate_connect_request(self, username, encrypt_enabled, req_id):
+        # If we already have a connection opened for this user, close it
+        if username in self.users_connections.keys():
+            self.users_connections[username].close_connection()
+        user = self.user_system.get_user(username)
+
+        token = self.generate_token()
+        connection = InterfaceDataConnection(token, encrypt_enabled)
+
+        # Build the response
+        response = self.build_accepted_response(req_id)
+        connect_body = dict()
+        connect_body[ConnectResponseBody.token] = token
+        connect_body[ConnectResponseBody.encryption_enabled] =\
+                encrypt_enabled or self.force_interface_encrypt
+        connect_body[ConnectResponseBody.data_port] = connection.get_port()
+        connect_body[ConnectResponseBody.permissions] =\
+            user.permissions.serialize()
+        response[ResponseFields.body] = connect_body
+
+        return str(json.dumps(response))
+
+
+    def evaluate_subscribe_request(self, username, connection, req_id):
+        if username not in self.subscribed_users:
+            self.subscribed_users.append(username)
+        ok_response = self.build_accepted_response(req_id)
+        connection.send_message(json.dumps(ok_response))
+
+
+    def evaluate_get_modules_request(self, username, connection, req_id):
+        response = self.build_accepted_response(req_id)
+        get_modules_body = dict()
+        get_modules_body[GetModulesResponseBody.modules] =\
+                self.shell.get_modules_names_list()
+        response[ResponseFields.body] = get_modules_body
+        connection.send_message(json.dumps(response))
+
+
+    def evaluate_get_configs_request(self, username, connection, req_id):
         pass
+
+
+    def evaluate_set_configs_request(self, username, connection, req_id):
+        pass
+
+
+    def evaluate_restart_request(self, username, connection, req_id):
+        #TODO
+        pass
+
+
+    def evaluate_search_request(self, username, connection, req_id):
+        pass
+
+
+    def evaluate_search_next_request(self, username, connection, req_id):
+        pass
+
+
+    def evaluate_search_stop_request(self, username, connection, req_id):
+        pass
+
+
+    def evaluate_add_user_request(self, username, connection, req_id):
+        user = self.user_system.get_user(username)
+        if not user.can_manage_users():
+            connection.send_message(\
+                self.build_missing_permissions_response(req_id))
+            return
+
+        
+
+
+    def evaluate_del_user_request(self, username, connection, req_id):
+        pass
+
+
+    def evaluate_set_user_request(self, username, connection, req_id):
+        pass
+
+
+    def evaluate_get_users_request(self, username, connection, req_id):
+        pass
+
+
+    def evaluate_general_request(self, request, host, port):
+        general_request = GeneralRequest(request)
+        general_request_ok = general_request.sanity_check()
+        if not general_request_ok:
+            return
+
+        general_request_type = general_request.get_type()
+        request_id = request.get_request_id()
+        username = request.get_username()
+
+        if general_request_type == 'CONNECT':
+            # Initialise the data connection for this user
+            connect_general_request = ConnectGeneralRequest(general_request)
+            return self.evaluate_connect_request(username,\
+                            connect_general_request.get_encryption_enabled(),\
+                            request_id)
+        else:
+            # Get the connection for this user
+            connection = self.get_connection(username)
+            if connection is None:
+                err_msg = 'ServerInterface: Received request prior to an '
+                err_msg += 'CONNECT request from %s:%s'
+                logging.error(err_msg, str(host), str(port))
+                return None
+
+            # Run the evaluation function for this request
+            self.request_eval_func[general_request_type](username,\
+                    connection, request_id)
+
+        return None
 
 
     def receive_request(self, data, host, port):
         """ Called when a request is received """
-        # De-serialize the request
-        try:
-            request = json.loads(data)
-        except:
-            err_msg = 'ServerInterface: Received non-JSON serializable request'
-            err_msg += ' from %s:%s' % (str(host), str(port))
-            logging.warning(err_msg, exc_info=True)
-            return
+        request = Request(data, host, port)
+        request_ok = request.sanity_check()
 
-        # Check username and password for the request
-        try:
-            username = request[RequestFields.username]
-        except:
-            err_msg = 'ServerInterface: Missing username in request from %s:%s'
-            logging.warning(err_msg, str(host), str(port))
-            return
-        try:
-            password = request[RequestFields.password]
-        except:
-            err_msg = 'ServerInterface: Missing password in request from %s:%s'
-            logging.warning(err_msg, str(host), str(port))
-            return
+        if not request_ok:
+            return None
 
+        # Authenticate the request
+        username = request.get_username()
+        password = request.get_password()
         try:
             self.user_system.validate_user(username, password)
         except:
             logging.error('ServerInterface: Authentication failure from %s:%s',\
                           str(host), str(port), exc_info=True)
-            return
-
-        # Make sure we have the target field
-        try:
-            target = request[RequestFields.target]
-        except:
-            err_msg = 'ServerInterface: Missing target in request from %s:%s'
-            logging.warning(err_msg, str(host), str(port))
+            return None
 
         # Check the target of the request
+        target = request.get_target()
         if target == "GENERAL":
             # General request
-            self.evaluate_general_request(request)
+            response = self.evaluate_general_request(request, host, port)
+            return response
         else:
             # Module specific request
 
@@ -147,9 +323,9 @@ class ServerInterface:
             connection = self.get_connection(request)
             if connection is None:
                 err_msg = 'ServerInterface: Received request prior to an '
-                err_msg += 'AUTHENTICATION request from %s:%s'
+                err_msg += 'CONNECT request from %s:%s'
                 logging.error(err_msg, str(host), str(port))
-                return
+                return None
 
             # Check if the targeted module exists
             modules_names = self.shell.get_modules_names_list()
@@ -157,11 +333,13 @@ class ServerInterface:
                 err_msg = 'ServerInterface: Invalid Request target %s from '
                 err_msg += '%s:%s' % (str(host), str(port))
                 logging.error(err_msg)
-                return
+                return None
 
             # Forward the request to the module
             module = self.shell.get_module(target)
             module.evaluate_request(request, connection)
+
+        return None
 
 
     def listen(self):
@@ -200,7 +378,387 @@ class ServerInterfaceSSLProtocol(Protocol):
             # TODO IPv6?
             host = peer.host
             port = peer.port
-        self.server_interface.receive_request(host, port, data)
+
+        # The response is useful only for an AUTHENTICATE request
+        response = self.server_interface.receive_request(host, port, data)
+
+        if response is not None:
+            sent_data = str(response) + message_delimiter
+            self.transport.write(sent_data)
+
+        # Force closing the connection
+        self.transport.loseConnection()
+
+
+
+class Request:
+    """ Request base class """
+
+    def __init__(self, data, host, port):
+        self.data = data
+        self.host = host
+        self.port = port
+
+        self.request = None
+
+        self.username = None
+        self.password = None
+        self.target = None
+        self.request_id = None
+        self.body = None
+
+
+    def sanity_check(self):
+        """
+        Must be performed after initialisation.
+        Also does the de-serialization of the request.
+        """
+        # Check it's JSON seriazable
+        try:
+            request = json.loads(self.data)
+            self.request = request
+        except:
+            err_msg = 'ServerInterface: Received non-JSON serializable request'
+            err_msg += ' from %s:%s' % (str(self.host), str(self.port))
+            logging.warning(err_msg, exc_info=True)
+            return False
+
+        # Check the username
+        try:
+            self.username = request[RequestFields.username]
+        except:
+            err_msg = 'ServerInterface: Missing username in request from %s:%s'
+            logging.warning(err_msg, str(self.host), str(self.port))
+            return False
+
+        # Check the password
+        try:
+            self.password = request[RequestFields.password]
+        except:
+            err_msg = 'ServerInterface: Missing password in request from %s:%s'
+            logging.warning(err_msg, str(self.host), str(self.port))
+            return False
+
+        # Check the request id
+        try:
+            self.request_id = request[RequestFields.request_id]
+        except:
+            err_msg = 'ServerInterface: Missing request_id in request from %s:%s'
+            logging.warning(err_msg, str(self.host), str(self.port))
+            return False
+
+        # Check the target
+        try:
+            self.target = request[RequestFields.target]
+        except:
+            err_msg = 'ServerInterface: Missing target in request from %s:%s'
+            logging.warning(err_msg, str(self.host), str(self.port))
+
+        # Check the body (optional)
+        if RequestFields.body in request.keys():
+            self.body = request[RequestFields.body]
+
+        return True
+
+
+    # Request fields
+
+    def get_username(self):
+        return self.username
+
+
+    def get_password(self):
+        return self.password
+
+
+    def get_request_id(self):
+        return self.request_id
+
+
+    def get_target(self):
+        return self.target
+
+
+    def get_body(self):
+        return self.body
+
+
+
+class GeneralRequest:
+
+    def __init__(self, request):
+        self.request = request
+
+        self.type = None
+        self.body = None
+
+
+    def sanity_check(self):
+        """ Checks the fields. Must be called after initialization """
+        # Check the type
+        try:
+            self.type = self.request.body[GeneralRequestBody.request_type]
+        except:
+            err_msg = 'ServerInterface: Missing type from general request'
+            logging.warning(err_msg)
+            return False
+
+        # Check the body (optional)
+        if GeneralRequestBody.request_body in self.request.body:
+            self.body = self.request.body[GeneralRequestBody.request_body]
+
+        return True
+
+
+    def get_type(self):
+        return self.type
+
+
+    def get_body(self):
+        return self.body
+
+
+
+class ConnectGeneralRequest:
+
+    def __init__(self, general_request):
+        self.body = general_request.get_body()
+
+
+    def sanity_check(self):
+        try:
+            self.encryption_enabled =\
+                self.body[ConnectGeneralRequestBody.enable_encryption]
+        except:
+            err_msg = 'ServerInterface: Missing encrypt_enabled field from'
+            err_msg += ' connect request'
+            logging.warning(err_msg)
+
+
+    def get_encryption_enabled(self):
+        return self.encryption_enabled
+
+
+
+class InterfaceDataConnection(Thread):
+    """
+    Connection where all the responses (except the CONNECT response) will be
+    sent. It uses a timeout and a message queue to avoid too many messages
+    sent.
+    """
+
+    timeout = 30.0
+    max_messages = 5
+
+    min_port_value = 10000
+    max_port_value = 30000
+
+    max_failed_tokens = 5
+
+
+    def __init__(self, token, encrypt_enabled=True):
+        """
+        token: The Connection first expects a token from the other side to make
+        sure it's the authenticated user.
+        encrypt_enabled: If the data port should be encrypted.
+        """
+        Thread.__init__(self)
+        self.token = token
+        self.daemon = True
+        self.shutdown = False
+        self.encrypt_enabled = encrypt_enabled
+
+        self.message_queue = deque()
+        self.message_queue_lock = Lock()
+        self.last_sent_time = time.time()
+
+        self.connected = False
+        self.port = None
+        self._listen()
+        self.token_socket = None
+        self.data_socket = None
+        self.data_socket_lock = Lock()
+        self.peer_host = None
+        self.peer_port = None
+
+
+    def _listen(self):
+        """ Starts listening for connect requests """
+        self.token_socket = socket.socket()
+        for port in range(self.min_port_value, self.max_port_value):
+            try:
+                self.token_socket.bind((socket.gethostname(), port))
+            except:
+                continue
+            self.port = port
+
+        if self.port is None:
+            err_msg = 'ServerInterface: Couldn\'t find open port for data'
+            err_msg += ' connection'
+            logging.error(err_msg)
+            self.shutdown = True
+            return
+
+        logging.info('ServerInterface: Listening for connections on port %d',\
+                     self.port)
+        self.token_socket.listen(5)
+
+
+    def _connect(self):
+        """ Connects and checks the token """
+        if self.shutdown:
+            return
+        for i in range(self.max_failed_tokens):
+            conn, addr = self.token_socket.accept()
+            conn.settimeout(1.0)
+            if self.encrypt_enabled:
+                self.data_socket = ssl.wrap_socket(conn)
+            else:
+                self.data_socket = conn
+
+            # Get the token
+            try:
+                token = self.data_socket.recv(ServerInterface.token_size)
+                while len(token) < ServerInterface.token_size:
+                    token += self.data_socket.recv(ServerInterface.token_size)
+            except:
+                logging.error('ServerInterface: Failed receiving token from %s',\
+                              str(addr))
+                continue
+
+            # Check the token
+            if token == self.token:
+                self.connected = True
+                self.data_socket.settimeout(0.5)
+                break
+
+
+    def get_port(self):
+        """ Returns the port on which we bind to listen for the connection """
+        return self.port
+
+
+    def send_message(self, message, real_time=False):
+        """
+        Sends a message to the peer.
+        message: The message to be sent. This must be a string.
+        real_time: If True, then the message will be sent as it comes (not
+        being added to the queue.
+        """
+        # If we did shutdown, we aren't sending messages
+        if self.shutdown:
+            return
+
+        # If it's a real time message, send it right away
+        if real_time:
+            if not self.connected:
+                err_msg = 'ServerInterface: Trying to send message without '
+                err_msg += ' connected'
+                logging.warning(err_msg)
+                return
+
+            sent_data = str(json.dumps([message])) + message_delimiter
+            if not self._send(sent_data):
+                err_msg = 'ServerInterface: Failed to send message to %s:%s'
+                logging.warning(err_msg, str(self.peer_host),\
+                                str(self.peer_port))
+                return
+
+            logging.debug('ServerInterface: Sending %s to %s:%s', str(message),\
+                          str(self.peer_host), str(self.peer_port))
+            return
+
+        # Not a real time message
+        self.message_queue_lock.acquire()
+        self.message_queue.append(message)
+        if not self.connected and len(self.message_queue) > self.max_messages:
+            self.message_queue.popleft()
+        self.message_queue_lock.release()
+
+
+    def check_time(self):
+        if time.time() - self.last_sent_time > self.timeout:
+            return True
+        return False
+
+
+    def check_size(self):
+        return len(self.message_queue) >= self.max_messages
+
+
+    def flush_queue(self):
+        if len(self.message_queue) is 0:
+            return
+
+        self.message_queue_lock.acquire()
+        sent_data = str(json.dumps(self.message_queue)) + message_delimiter
+        self.message_queue = []
+        self.message_queue_lock.release()
+        if not self._send(sent_data):
+            err_msg = 'ServerInterface: Failed to send message to %s:%s'
+            logging.warning(err_msg, str(self.peer_host),\
+                            str(self.peer_port))
+        self.last_sent_time = time.time()
+
+
+    def close_connection(self):
+        if not self.connected:
+            # We are still connecting, but we should send the
+            # connection closed response when the connection
+            # is made.
+            self.shutdown = True
+
+        close_response = dict()
+        close_response[ResponseFields.request_id] = -1
+        close_response[ResponseFields.response_code] =\
+            ResponseCodes.connection_closed
+        sent_data = str(json.dumps(close_response)) + message_delimiter
+        self._send(sent_data)
+
+
+    def _send(self, data):
+        if not self.connected:
+            return
+        
+        total_sent_b = 0
+        length = len(data)
+        self.data_socket_lock.acquire()
+        try:
+            while total_sent_b < length:
+                sent = self.data_socket.send(data[total_sent_b:])
+                if sent is 0:
+                    self.shutdown = True
+                    self.data_socket.close()
+                    return False
+                total_sent_b += sent
+        except:
+            logging.error('ServerInterface: Failed to send data to %s:%s',\
+                          str(self.peer_host), str(self.peer_port),\
+                          exc_info=True)
+        self.data_socket_lock.release()
+        return not self.shutdown
+
+
+    def run(self):
+        self._connect()
+        if not self.connected:
+            self.shutdown = True
+            return
+
+        # Special case when we received a close_connection while connecting
+        if self.shutdown:
+            self.close_connection()
+            return
+
+        while True:
+
+            if self.check_time() or self.check_size():
+                self.message_queue_lock.acquire()
+                self.flush_queue()
+                self.message_queue_lock.release()
+            time.sleep(0.5)
+
+
 
 # Requests section
 
@@ -236,9 +794,9 @@ class GeneralRequestBody:
     The mandatory fields in a request having the 'General' target:
     * request_type: Identifies the type of the general request. This field can
       have one of the following values:
-      - "AUTHENTICATION": The requesting side wants to authenticate to the
+      - "CONNECT": The requesting side wants to connect to the
         Server. This is mandatory before sending any other request. See
-        AuthenticationGeneralRequestBody for details about this request.
+        ConnectGeneralRequestBody for details about this request.
       - "SUBSCRIBE": The requesting side wants to subscribe to the Server to
         receive notifications as they come. See SubscribeGeneralRequestBody for
         details about this request.
@@ -275,10 +833,10 @@ class GeneralRequestBody:
     request_body = 'general_request_body'
 
 
-class AuthenticateGeneralRequestBody:
+class ConnectGeneralRequestBody:
     """
     The mandatory fields in a general request having request_type equal to
-    "AUTHENTICATE":
+    "CONNECT":
     * enable_encryption: If True, subsequent request/responses will use a SSL
       encrypted TCP connection. If False, a non-encrypted TCP connection will
       be used. Note: This can be overridden by the Server Configurations. See
@@ -434,6 +992,15 @@ class SetUserGeneralRequestBody:
 
 # Responses section
 
+class ResponseCodes:
+    accepted = 200
+    auth_denied = 401
+    missing_connection = 403
+    missing_permissions = 400
+    invalid = 406
+    connection_closed = 100
+
+
 class ResponseFields:
     """
     The mandatory fields in a response:
@@ -442,14 +1009,19 @@ class ResponseFields:
     * response_code: An int showing the state of the response:
       - 200: The request was accepted.
       - 401: Authentication denied.
-      - 403: Request without prior authentication.
+      - 403: Request without prior to a connection.
       - 400: Missing permissions.
       - 406: Invalid request.
+      - 100: Connection Closed
+    * response_type: A string showing the response type. This is useful only
+      for asynchronous response (request_id == -1). For synchronous responses,
+      the request_id is sufficient to determine the type of the response.
     * body: Based on the request_id which will identify the request type, then
       this will contain the response body. For requests having the 'GENERAL'
       target and based on the 'general_request_type' field, the following
       responses bodies are possible:
-      - 'AUTHENTICATE': AuthenticateResponseBody
+      - 'CONNECT': ConnectResponseBody
+      - 'GET_MODULES': GetModulesResponseBody
       - 'GET_CONFIGS': GetConfigsResponseBody
       - 'SEARCH': SearchResponseBody
       - 'SEARCH_NEXT': SearchResponseBody
@@ -459,12 +1031,13 @@ class ResponseFields:
     """
     request_id = 'request_id'
     response_code = 'response_code'
+    response_type = 'response_type'
     body = 'body'
 
 
-class AuthenticateResponseBody:
+class ConnectResponseBody:
     """
-    The response for a 'AUTHENTICATE' general request. Fields:
+    The response for a 'CONNECT' general request. Fields:
     * permissions: The permissions for the user as they are stored on the
       server. See umit.inventory.server.UserSystem.UserPermissions (the value
       here is what is returned by the serialize method). This field is only
@@ -479,6 +1052,15 @@ class AuthenticateResponseBody:
     permissions = 'permissions'
     data_port = 'data_port'
     encryption_enabled = 'encryption_enabled'
+    token = 'token'
+
+
+class GetModulesResponseBody:
+    """
+    The response for a 'GET_MODULES' general request. Fields:
+    * modules: A list with the modules installed and enabled on the server.
+    """
+    modules = 'modules'
 
 
 class GetConfigsResponseBody:
