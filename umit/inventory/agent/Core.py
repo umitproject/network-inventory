@@ -28,6 +28,8 @@ from umit.inventory.agent.Configs import AgentConfig
 from umit.inventory.common import CorruptInventoryModule
 from umit.inventory.common import AgentFields
 from umit.inventory import common
+from umit.inventory.common import message_delimiter
+
 
 class AgentMainLoop:
 
@@ -121,6 +123,7 @@ class AgentMainLoop:
                 except Exception, e:
                     logging.error('Loading failed for module %s',\
                                  module_name, exc_info=True)
+                    continue
 
                 logging.info('Loaded module %s', module_obj.get_name())
                 self.modules.append(module_obj)
@@ -185,7 +188,7 @@ class AgentNotificationParser:
             configs.get_general_option(AgentConfig.password)
 
 
-    def parse(self, message):
+    def parse(self, message, emptying_queue=False):
         """
         Sends the notification to the Notifications Server. If configured, it
         will use a SSL connection to send it.
@@ -224,12 +227,24 @@ class AgentNotificationParser:
                 return True
 
             # Successfully connected. Sending message.
-            s.send(message)
+            sent_data = str(message) + message_delimiter
+            total_sent_b = 0
+            length = len(sent_data)
+            try:
+                while total_sent_b < length:
+                    sent = s.send(sent_data[total_sent_b:])
+                    if sent is 0:
+                        s.close()
+                        return False
+                    total_sent_b += sent
+            except:
+                logging.error('Failed to send notification to Server', exc_info=True)
             s.close()
 
             # If we got here, the Server is running so we can try to send
             # the notifications we have in the queue (if any)
-            self.send_notifications_from_queue()
+            if not emptying_queue:
+                self.send_notifications_from_queue()
             return True
         # Send trough UDP
         else:
@@ -244,12 +259,11 @@ class AgentNotificationParser:
 
         sent_items = 0
         while len(self.notification_queue) > 0:
-            print sent_items
             initial_size = len(self.notification_queue)
-            print initial_size
+
             # Trying to send the notification
             notification = self.notification_queue.pop()
-            self.parse(notification)
+            self.parse(notification, True)
 
             # If it returned to the queue, we failed.
             if initial_size == len(self.notification_queue):
@@ -262,15 +276,17 @@ class AgentNotificationParser:
 
 
     @staticmethod
-    def encode(message, msg_type, fields, module):
+    def encode(message, short_message, msg_type, fields, is_report, module):
         """Encodes the message into the internal format (JSON)"""
         message_obj = dict()
         message_obj[AgentFields.message] = message
+        message_obj[AgentFields.short_message] = short_message
         message_obj[AgentFields.message_type] = msg_type
         message_obj[AgentFields.timestamp] = time.time()
         message_obj[AgentFields.monitoring_module] = module
         message_obj[AgentFields.hostname] = socket.gethostname()
         message_obj[AgentFields.module_fields] = dict()
+        message_obj[AgentFields.is_report] = is_report
         for i in fields.keys():
             message_obj[AgentFields.module_fields][i] = fields[i]
 

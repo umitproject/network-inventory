@@ -193,8 +193,14 @@ class AgentListener(ListenerServerModule, ServerModule):
             fields[NotificationFields.notification_type] =\
                     str(temp[AgentFields.message_type])
 
+            fields[NotificationFields.short_description] =\
+                    unicode(temp[AgentFields.short_message])
+
             fields[NotificationFields.description] =\
                     unicode(temp[AgentFields.message])
+
+            fields[NotificationFields.is_report] =\
+                    bool(temp[AgentFields.is_report])
             
             fields[AgentNotificationFields.monitoring_module] =\
                     unicode(temp[AgentFields.monitoring_module])
@@ -329,7 +335,7 @@ class AgentNotification(Notification):
     """ The notification class associated to this protocol """
 
     def get_name(self):
-        return 'UmitAgentNotification'
+        return 'AgentNotification'
 
     def get_fields_class(self):
         return AgentNotificationFields

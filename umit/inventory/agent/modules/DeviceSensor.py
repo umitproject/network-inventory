@@ -60,7 +60,6 @@ class DeviceSensor(MonitoringModule):
 
     # Module fields
     uptime = 'uptime'
-    hostname = 'hostname'
     cpu_percent = 'cpu_percent'
     ram_percent = 'ram_percent'
     boot_time = 'boot_time_date'
@@ -333,6 +332,7 @@ class TrackerDefinitionFields:
     mode: The mode of the tracking: raw, avg or diff.
     reducing_time: If mode is avg or diff, the time interval for the reduction.
     notif_type: The type of the notification to be sent.
+    notif_short_msg: Very short description of the notification.
     notif_msg: The message to be sent alongside the notification.
     """
     var_name = 'tracking_variable'
@@ -341,6 +341,7 @@ class TrackerDefinitionFields:
     threshold_comp = 'threshold_comp'
     mode = 'mode'
     reducing_time = 'reducing_time'
+    notif_short_msg = 'notif_short_msg'
     notif_msg = 'notif_msg'
     notif_type = 'notif_type'
     cooldown = 'cooldown'
@@ -417,6 +418,9 @@ class TrackersManager:
         tracker_def[TrackerDefinitionFields.threshold] = None
         tracker_def[TrackerDefinitionFields.threshold_comp] = None
         tracker_def[TrackerDefinitionFields.cooldown] = report_cooldown
+        tracker_def[TrackerDefinitionFields.notif_short_msg] =\
+            'Scheduled Device Sensor report (each %.2f minutes)' %\
+            (report_cooldown/60.0)
         tracker_def[TrackerDefinitionFields.notif_msg] = report_template
         tracker_def[TrackerDefinitionFields.notif_type] =\
                 NotificationTypes.info
@@ -454,6 +458,7 @@ class TrackersManager:
         else:
             cooldown = 360.0
         notif_msg = tracker_def[TrackerDefinitionFields.notif_msg]
+        short_notif_msg = tracker_def[TrackerDefinitionFields.notif_short_msg]
         notif_type = tracker_def[TrackerDefinitionFields.notif_type]
         threshold = tracker_def[TrackerDefinitionFields.threshold]
         threshold_comp = tracker_def[TrackerDefinitionFields.threshold_comp]
@@ -492,8 +497,9 @@ class TrackersManager:
 
         # Return the initialized tracker
         return tracker_class(self.measurement_manager, var_id, threshold,\
-                threshold_comp, notif_msg, notif_type, notif_vars,\
-                notif_vars_modifiers, self, cooldown, mode, reducing_time)
+                threshold_comp, notif_msg, short_notif_msg, notif_type,\
+                notif_vars, notif_vars_modifiers, self, cooldown, mode,\
+                reducing_time)
 
 
     def parse_message_template(self, notif_msg):
@@ -577,12 +583,10 @@ class TrackersManager:
         return None
 
 
-    def alert(self, msg, msg_type):
+    def alert(self, msg, msg_type, short_msg, is_report):
         fields = dict()
         fields[DeviceSensor.uptime] =\
                 self.measurement_manager.get_variable(DeviceSensor.uptime)
-        fields[DeviceSensor.hostname] =\
-                self.measurement_manager.get_variable(DeviceSensor.hostname)
         fields[DeviceSensor.cpu_percent] =\
                 self.measurement_manager.get_variable(DeviceSensor.cpu_percent)
         fields[DeviceSensor.ram_percent] = \
@@ -591,7 +595,9 @@ class TrackersManager:
                 self.measurement_manager.get_variable(DeviceSensor.net_sent_bytes)
         fields[DeviceSensor.net_recv_bytes] =\
                 self.measurement_manager.get_variable(DeviceSensor.net_recv_bytes)
-        self.device_sensor.send_message(msg, msg_type, fields)
+
+        self.device_sensor.send_message(msg, short_msg, msg_type,\
+                                        fields, is_report)
 
 
 
@@ -617,8 +623,9 @@ class DeviceValueTracker:
 
 
     def __init__(self, measure_manager, varid, threshold, comp_mode, notif_msg,\
-            notif_type, notif_vars, notif_vars_modifiers, tracker_manager,\
-            cooldown=300.0, track_type='raw', time_interval_size=1.0):
+            short_notif_msg, notif_type, notif_vars, notif_vars_modifiers,\
+            tracker_manager, cooldown=300.0, track_type='raw',\
+            time_interval_size=1.0):
         """
         measure_manager: A MeasurementManager object.
         varid: The variable id of the variable we are tracking.
@@ -627,6 +634,7 @@ class DeviceValueTracker:
         value. Possible values: 'gt', 'gte', 'eq', 'lte', 'less'.
         notif_msg: The notification message template, filled with %s where
         variables should be placed.
+        short_notif_msg: A short description of the notification.
         notif_type: The type of the notification to be sent.
         notif_vars: The variables for the notif_msg template. These should be
         valid variable id's or one of the following strings: 'value' or
@@ -652,6 +660,7 @@ class DeviceValueTracker:
         self.comp_mode = comp_mode
         self.notif_type = notif_type
         self.notif_msg = notif_msg
+        self.short_notif_msg = short_notif_msg
         self.notif_vars = notif_vars
         self.notif_vars_modifiers = notif_vars_modifiers
         self.track_type = track_type
@@ -743,7 +752,7 @@ class DeviceValueTracker:
         return False
 
 
-    def alert(self):
+    def alert(self, is_report=False):
         if self.var_id is not None:
             logging.debug('Sending an DeviceSensor alert for %s', self.var_id)
         else:
@@ -781,7 +790,8 @@ class DeviceValueTracker:
             return
 
         try:
-            self.tracker_manager.alert(computed_notif_msg, self.notif_type)
+            self.tracker_manager.alert(computed_notif_msg, self.notif_type,\
+                                       self.short_notif_msg, is_report)
         except:
             logging.error('DeviceSensor tracker failed to alert', exc_info=True)
 
@@ -812,7 +822,7 @@ class ReportTracker(DeviceValueTracker):
         if not self.check_ramp_up():
             return
 
-        self.alert()
+        self.alert(True)
         self.cooling_down = True
         self.cooling_down_end = time.time() + self.cooldown
 

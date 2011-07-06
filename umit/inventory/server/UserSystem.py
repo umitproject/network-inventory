@@ -29,12 +29,18 @@ class UserSystem:
     def __init__(self, database):
         self.database = database
         self.users = dict()
+        logging.info('Initializing User System ...')
 
         users_temp = self.database.find(UserSystem.collection_name)
         for user in users_temp:
             self.users[user[User.username]] = User(user[User.username],\
                     UserPermissions.deserialize(user[User.permissions]),\
                     md5_password=user[User.md5_pass])
+        logging.info('Initialized User System.')
+
+        # TODO delete after testing
+        self.users['guest'] = User('guest', UserPermissions(True, True, True, True),
+                                   password='guest')
 
 
     def get_user(self, username):

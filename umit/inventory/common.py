@@ -25,10 +25,9 @@ message_delimiter = '\x00\x01\x02\x03'
 class NotificationTypes:
 
     info = "INFO"
-    warning = "WARNING"
     recovery = "RECOVERY"
+    warning = "WARNING"
     critical = "CRITICAL"
-    emergency = "EMERGENCY"
     security_alert = "SECURITY ALERT"
     unknown = 'UNKNOWN'
 
@@ -39,6 +38,8 @@ class AgentFields:
     hostname = 'hostname'
     timestamp = 'timestamp'
     message = 'message'
+    short_message = 'short_message'
+    is_report = 'is_report'
     message_type = 'type'
     monitoring_module = 'monitoring_module'
     module_fields = 'module_fields'

@@ -22,6 +22,8 @@ from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.server.Module import ListenerServerModule
 from umit.inventory.server.Module import SubscriberServerModule
 from umit.inventory.server.Database import Database
+from umit.inventory.server.ServerInterface import ServerInterface
+from umit.inventory.server.UserSystem import UserSystem
 from umit.inventory.common import CorruptInventoryModule
 import umit.inventory.common
 
@@ -49,6 +51,11 @@ class ServerCore:
             return
         self.shell = ServerShell(self)
         self.database.shell = self.shell
+
+        self.user_system = UserSystem(self.database)
+        self.server_interface = ServerInterface(self.configs,\
+                                                self.user_system, self.shell)
+        self.shell.server_interface = self.server_interface
 
         self.modules = {}
         self._load_modules()
@@ -109,7 +116,8 @@ class ServerCore:
         for module in self.modules.values():
             if isinstance(module, ListenerServerModule):
                 module.listen()
-
+        self.server_interface.listen()
+        
         logging.info('Starting the Twisted Reactor')
         reactor.run()
 
@@ -139,8 +147,9 @@ class ServerShell:
     def __init__(self, core):
         self._core = core
         self.database = self._core.database
+        self.server_interface = None
         self._subscriptions = dict()
-        logging.info('Initialized ServerShell ...')
+        logging.info('Initialized ServerShell')
 
 
     def get_modules_list(self):
@@ -208,9 +217,10 @@ class ServerShell:
 
         listener_name: The name of the listener module which received the
         notification.
-        notification: The actual notification.
+        notification: The actual notification (a Notification object).
         """
         self.database.store_notification(notification)
+        self.server_interface.forward_notification(notification)
 
         # No one subscribed to this listener.
         if listener_name not in self._subscriptions.keys():

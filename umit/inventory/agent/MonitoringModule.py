@@ -59,16 +59,18 @@ class MonitoringModule(Thread):
         raise MonitoringModule.NotImplemented('get_name')
 
 
-    def send_message(self, message, msg_type, fields):
+    def send_message(self, message, short_message, msg_type, fields, is_report):
         """
         Used by the Monitoring Module which inherents this class
         to send the message to the Notifications Server.
         message: The actual message text.
+        short_message: A short description of the notification.
         msg_type: The type of the message. See umit.inventory.common
         fields: A dictionary with the module specific fields.
+        is_report: True if the notification is a report.
         """
-        notification = AgentNotificationParser.encode(message, msg_type,\
-                fields, self.get_name())
+        notification = AgentNotificationParser.encode(message, short_message,\
+                msg_type, fields, is_report, self.get_name())
         self.agent_main_loop.add_message(notification)
 
 

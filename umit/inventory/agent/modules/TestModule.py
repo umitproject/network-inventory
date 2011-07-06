@@ -94,9 +94,10 @@ class TestModule(MonitoringModule):
         logging.info('Starting up the %s module ...', self.get_name())
         while True:
             msg = self._generate_random_message()
+            short_msg = 'Random message generated at %f' % time.time()
             msg_type = self._generate_random_type()
             fields = self._generate_random_fields()
-            self.send_message(msg, msg_type, fields)
+            self.send_message(msg, short_msg, msg_type, fields, False)
 
 
     def init_default_settings(self):

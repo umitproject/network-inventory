@@ -22,12 +22,14 @@ from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.common import message_delimiter
-from umit.inventory.server.UserSystem import UserPermissions
+from umit.inventory.server.Module import SubscriberServerModule
 
 from twisted.internet import reactor
 from twisted.internet.protocol import Factory
 from twisted.internet.protocol import Protocol
 from twisted.internet.address import IPv4Address
+from twisted.protocols.basic import LineReceiver
+import twisted.internet.ssl
 
 import socket
 import logging
@@ -39,6 +41,7 @@ import os
 import string
 from random import choice
 from threading import Thread
+from threading import Semaphore
 from threading import Lock
 from collections import deque
 
@@ -50,7 +53,7 @@ class ServerInterface:
     cert_expire = 316224000
 
     # Token size for CONNECT requests
-    token_size = 512
+    token_size = 1024
 
     # SSL files
     cert_file_name = os.path.join(tempfile.gettempdir(),\
@@ -64,9 +67,13 @@ class ServerInterface:
         self.conf = conf
         self.shell = shell
         self.requests_port =\
-                self.conf.get_general_option(ServerConfig.interface_port)
+                int(self.conf.get_general_option(ServerConfig.interface_port))
         self.force_interface_encrypt =\
                 self.conf.get_general_option(ServerConfig.force_interface_encrypt)
+
+        self._generate_ssl_files()
+
+        ServerInterfaceSSLProtocol.server_interface = self
 
         # Dictionary mapping request types to their evaluating functions
         self.request_eval_func = {\
@@ -164,6 +171,23 @@ class ServerInterface:
         cert_file.close()
 
 
+    def forward_notification(self, notification):
+        """ Called when the Server receives a notification """
+        for username in self.subscribed_users:
+            user_connection = self.users_connections[username]
+
+            # If the connection died, remove it
+            if user_connection.shutdown:
+                self.subscribed_users.remove(username)
+                del self.users_connections[username]
+                continue
+
+            # Forward the notification (if not a report) to the user
+            if notification.fields[NotificationFields.is_report] is False:
+                message = json.dumps(notification.fields)
+                user_connection.send_message(message)
+
+        
     def get_connection(self, username):
         """
         Gets the connection for this request, or None if an 'CONNECT'
@@ -181,7 +205,9 @@ class ServerInterface:
         user = self.user_system.get_user(username)
 
         token = self.generate_token()
+                
         connection = InterfaceDataConnection(token, encrypt_enabled)
+        connection.start()
 
         # Build the response
         response = self.build_accepted_response(req_id)
@@ -197,14 +223,20 @@ class ServerInterface:
         return str(json.dumps(response))
 
 
-    def evaluate_subscribe_request(self, username, connection, req_id):
+    def evaluate_subscribe_request(self, request, connection):
+        username = request.get_username()
+        req_id = request.get_request_id()
+
         if username not in self.subscribed_users:
             self.subscribed_users.append(username)
         ok_response = self.build_accepted_response(req_id)
         connection.send_message(json.dumps(ok_response))
 
 
-    def evaluate_get_modules_request(self, username, connection, req_id):
+    def evaluate_get_modules_request(self, request, connection):
+        username = request.get_username()
+        req_id = request.get_request_id()
+
         response = self.build_accepted_response(req_id)
         get_modules_body = dict()
         get_modules_body[GetModulesResponseBody.modules] =\
@@ -213,50 +245,52 @@ class ServerInterface:
         connection.send_message(json.dumps(response))
 
 
-    def evaluate_get_configs_request(self, username, connection, req_id):
+    def evaluate_get_configs_request(self, request, connection):
         pass
 
 
-    def evaluate_set_configs_request(self, username, connection, req_id):
+    def evaluate_set_configs_request(self, request, connection):
         pass
 
 
-    def evaluate_restart_request(self, username, connection, req_id):
+    def evaluate_restart_request(self, request, connection):
         #TODO
         pass
 
 
-    def evaluate_search_request(self, username, connection, req_id):
+    def evaluate_search_request(self, request, connection):
         pass
 
 
-    def evaluate_search_next_request(self, username, connection, req_id):
+    def evaluate_search_next_request(self, request, connection):
         pass
 
 
-    def evaluate_search_stop_request(self, username, connection, req_id):
+    def evaluate_search_stop_request(self, request, connection):
         pass
 
 
-    def evaluate_add_user_request(self, username, connection, req_id):
+    def evaluate_add_user_request(self, request, connection):
+        username = request.get_username()
+        req_id = request.get_request_id()
+
         user = self.user_system.get_user(username)
         if not user.can_manage_users():
             connection.send_message(\
                 self.build_missing_permissions_response(req_id))
             return
 
-        
+        # TODO
 
-
-    def evaluate_del_user_request(self, username, connection, req_id):
+    def evaluate_del_user_request(self, request, connection):
         pass
 
 
-    def evaluate_set_user_request(self, username, connection, req_id):
+    def evaluate_set_user_request(self, request, connection):
         pass
 
 
-    def evaluate_get_users_request(self, username, connection, req_id):
+    def evaluate_get_users_request(self, request, connection):
         pass
 
 
@@ -273,6 +307,11 @@ class ServerInterface:
         if general_request_type == 'CONNECT':
             # Initialise the data connection for this user
             connect_general_request = ConnectGeneralRequest(general_request)
+
+            connect_general_request_ok = connect_general_request.sanity_check()
+            if not connect_general_request_ok:
+                return None
+
             return self.evaluate_connect_request(username,\
                             connect_general_request.get_encryption_enabled(),\
                             request_id)
@@ -285,6 +324,13 @@ class ServerInterface:
                 logging.error(err_msg, str(host), str(port))
                 return None
 
+            # Test if the connection died with the client
+            if connection.shutdown:
+                del self.users_connections[username]
+                if username in self.subscribed_users:
+                    self.subscribed_users.remove(username)
+                return None
+
             # Run the evaluation function for this request
             self.request_eval_func[general_request_type](username,\
                     connection, request_id)
@@ -294,6 +340,7 @@ class ServerInterface:
 
     def receive_request(self, data, host, port):
         """ Called when a request is received """
+
         request = Request(data, host, port)
         request_ok = request.sanity_check()
 
@@ -303,6 +350,7 @@ class ServerInterface:
         # Authenticate the request
         username = request.get_username()
         password = request.get_password()
+
         try:
             self.user_system.validate_user(username, password)
         except:
@@ -314,8 +362,7 @@ class ServerInterface:
         target = request.get_target()
         if target == "GENERAL":
             # General request
-            response = self.evaluate_general_request(request, host, port)
-            return response
+            return self.evaluate_general_request(request, host, port)
         else:
             # Module specific request
 
@@ -347,7 +394,7 @@ class ServerInterface:
         ssl_factory = Factory()
         ServerInterfaceSSLProtocol.agent_listener = self
         ssl_factory.protocol = ServerInterfaceSSLProtocol
-        ssl_context_factory = ssl.DefaultOpenSSLContextFactory(\
+        ssl_context_factory = twisted.internet.ssl.DefaultOpenSSLContextFactory(\
             self.key_file_name, self.cert_file_name)
         logging.info('ServerInterface: Trying to listen SSL on port %s',\
                      str(self.requests_port))
@@ -357,11 +404,11 @@ class ServerInterface:
                          str(self.requests_port))
         except:
             logging.error('ServerInterface: Failed to listen SSL on port %s',\
-                          str(self.requests_port))
+                          str(self.requests_port), exc_info=True)
 
 
 
-class ServerInterfaceSSLProtocol(Protocol):
+class ServerInterfaceSSLProtocol(LineReceiver):
     """ Listening for requests """
 
     # The ServerInterface object
@@ -369,8 +416,10 @@ class ServerInterfaceSSLProtocol(Protocol):
 
     def __init__(self):
         self.server_interface = ServerInterfaceSSLProtocol.server_interface
+        self.delimiter = message_delimiter
 
-    def dataReceived(self, data):
+
+    def lineReceived(self, line):
         peer = self.transport.getPeer()
         host = ''
         port = -1
@@ -380,11 +429,10 @@ class ServerInterfaceSSLProtocol(Protocol):
             port = peer.port
 
         # The response is useful only for an AUTHENTICATE request
-        response = self.server_interface.receive_request(host, port, data)
+        response = self.server_interface.receive_request(line, host, port)
 
         if response is not None:
-            sent_data = str(response) + message_delimiter
-            self.transport.write(sent_data)
+            self.sendLine(response)
 
         # Force closing the connection
         self.transport.loseConnection()
@@ -419,10 +467,11 @@ class Request:
             self.request = request
         except:
             err_msg = 'ServerInterface: Received non-JSON serializable request'
-            err_msg += ' from %s:%s' % (str(self.host), str(self.port))
-            logging.warning(err_msg, exc_info=True)
+            err_msg += ' from %s:%s'
+            logging.warning(err_msg, str(self.host), str(self.port),\
+                            exc_info=True)
             return False
-
+        
         # Check the username
         try:
             self.username = request[RequestFields.username]
@@ -534,6 +583,8 @@ class ConnectGeneralRequest:
             err_msg += ' connect request'
             logging.warning(err_msg)
 
+        return True
+
 
     def get_encryption_enabled(self):
         return self.encryption_enabled
@@ -565,17 +616,23 @@ class InterfaceDataConnection(Thread):
         Thread.__init__(self)
         self.token = token
         self.daemon = True
-        self.shutdown = False
-        self.encrypt_enabled = encrypt_enabled
+        self.connect_semaphore = Semaphore(0)
 
+        # This will be True when the connection is no longer valid
+        self.shutdown = False
+        
+        self.encrypt_enabled = encrypt_enabled
+        
         self.message_queue = deque()
         self.message_queue_lock = Lock()
         self.last_sent_time = time.time()
 
         self.connected = False
         self.port = None
-        self._listen()
+
         self.token_socket = None
+        self._listen()
+
         self.data_socket = None
         self.data_socket_lock = Lock()
         self.peer_host = None
@@ -585,36 +642,57 @@ class InterfaceDataConnection(Thread):
     def _listen(self):
         """ Starts listening for connect requests """
         self.token_socket = socket.socket()
+
         for port in range(self.min_port_value, self.max_port_value):
             try:
                 self.token_socket.bind((socket.gethostname(), port))
             except:
                 continue
             self.port = port
+            break
 
         if self.port is None:
             err_msg = 'ServerInterface: Couldn\'t find open port for data'
             err_msg += ' connection'
             logging.error(err_msg)
             self.shutdown = True
+            self.connect_semaphore.release()
             return
 
         logging.info('ServerInterface: Listening for connections on port %d',\
                      self.port)
         self.token_socket.listen(5)
+        print 'done ...'
+        print self.token_socket
+        self.connect_semaphore.release()
+        print '--------------------------'
 
 
     def _connect(self):
         """ Connects and checks the token """
+        print 'aici3333'
+        print self.token_socket
         if self.shutdown:
             return
+        print 'errrrr'
         for i in range(self.max_failed_tokens):
+            print 'hmmmmmmmmmmm ....'
             conn, addr = self.token_socket.accept()
+            print '$$$$$$$$$$$$$$'
+            print conn
+            print addr
             conn.settimeout(1.0)
             if self.encrypt_enabled:
-                self.data_socket = ssl.wrap_socket(conn)
+                print 'wtf'
+                self.data_socket = ssl.wrap_socket(conn, server_side=True,\
+                    keyfile=ServerInterface.key_file_name,\
+                    certfile=ServerInterface.cert_file_name)
             else:
+                print 'fuck'
                 self.data_socket = conn
+
+            print '--------------'
+            print self.data_socket
 
             # Get the token
             try:
@@ -622,13 +700,18 @@ class InterfaceDataConnection(Thread):
                 while len(token) < ServerInterface.token_size:
                     token += self.data_socket.recv(ServerInterface.token_size)
             except:
-                logging.error('ServerInterface: Failed receiving token from %s',\
-                              str(addr))
+                err_msg = 'ServerInterface: Failed receiving token from %s.'
+                err_msg += ' Try number: %d'
+                logging.error(err_msg, str(addr), i + 1)
                 continue
 
             # Check the token
             if token == self.token:
                 self.connected = True
+                self.peer_host = addr[0]
+                self.peer_port = addr[1]
+                msg = 'ServerInterface: Received token from %s. Connected.'
+                logging.info(msg, str(addr))
                 self.data_socket.settimeout(0.5)
                 break
 
@@ -714,6 +797,7 @@ class InterfaceDataConnection(Thread):
             ResponseCodes.connection_closed
         sent_data = str(json.dumps(close_response)) + message_delimiter
         self._send(sent_data)
+        self.data_socket.close()
 
 
     def _send(self, data):
@@ -729,6 +813,7 @@ class InterfaceDataConnection(Thread):
                 if sent is 0:
                     self.shutdown = True
                     self.data_socket.close()
+                    self.data_socket_lock.release()
                     return False
                 total_sent_b += sent
         except:
@@ -740,6 +825,15 @@ class InterfaceDataConnection(Thread):
 
 
     def run(self):
+        # Wait for _listen green light
+        print 'waiting ...'
+        print time.time()
+        self.connect_semaphore.acquire()
+        print 'released ...'
+        print time.time()
+
+        print self.token_socket
+
         self._connect()
         if not self.connected:
             self.shutdown = True
@@ -751,6 +845,10 @@ class InterfaceDataConnection(Thread):
             return
 
         while True:
+            if self.shutdown:
+                msg = 'ServerInterface: Connection with %s:%s shutting down ...'
+                logging.info(msg, str(self.peer_host), str(self.peer_port))
+                break
 
             if self.check_time() or self.check_size():
                 self.message_queue_lock.acquire()
@@ -791,15 +889,16 @@ class RequestFields:
 
 class GeneralRequestBody:
     """
-    The mandatory fields in a request having the 'General' target:
+    The mandatory fields in a request having the 'GENERAL' target:
     * request_type: Identifies the type of the general request. This field can
       have one of the following values:
       - "CONNECT": The requesting side wants to connect to the
         Server. This is mandatory before sending any other request. See
         ConnectGeneralRequestBody for details about this request.
       - "SUBSCRIBE": The requesting side wants to subscribe to the Server to
-        receive notifications as they come. See SubscribeGeneralRequestBody for
-        details about this request.
+        receive notifications as they come. This will ony forward notifications
+        which are not reports. See SubscribeGeneralRequestBody for details
+        about this request.
       - "GET_MODULES": The requesting side wants to know which modules are
         installed and enabled on the Server. There isn't any associated body
         for this request.

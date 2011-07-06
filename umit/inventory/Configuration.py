@@ -106,7 +106,10 @@ class InventoryConfig(ConfigParser):
 
     def get_general_option(self, option_name):
         """Get an option which is saved in the GeneralSettings section"""
-        return self.get(InventoryConfig.general_section, option_name)
+        if self.has_option(InventoryConfig.general_section, option_name):
+            return self.get(InventoryConfig.general_section, option_name)
+        else:
+            return None
 
 
     # Module options methods
@@ -172,7 +175,10 @@ class InventoryConfig(ConfigParser):
         if not self.module_is_installed(module_name):
             raise InventoryConfig.ModuleNotInstalled(module_name)
 
-        return self.get(module_name, option_name)
+        if self.has_option(module_name, option_name):
+            return self.get(module_name, option_name)
+        else:
+            return None
 
 
     def module_set_options(self, module_name, option_dict, overwrite=True):

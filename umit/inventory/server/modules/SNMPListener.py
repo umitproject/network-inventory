@@ -35,6 +35,7 @@ from pysnmp.proto.secmod.rfc3414 import auth, priv, localkey
 import traceback
 from copy import copy
 import time
+import logging
 import socket
 
 
@@ -179,6 +180,8 @@ class SNMPListener(ListenerServerModule, ServerModule):
             fields[NotificationFields.protocol] = str(self.get_protocol_name())
             fields[NotificationFields.description] =\
                     unicode(SNMPUtils.parse_description(variables_dict))
+            fields[NotificationFields.short_description] = u'SNMPv1 Trap'
+            fields[NotificationFields.is_report] = False
             fields[NotificationFields.notification_type] =\
                     str(SNMPUtils.parse_type(generic_trap_id))
 
@@ -262,6 +265,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
         print 'trap_oid: %s' % trap_oid
         print 'enterprise_oid: %s' % trap_enterprise
         print 'Variables:'
+
         for key in optional_parameters.keys():
             print '\t%s = %s (%s)' % (key, optional_parameters[key],\
                     type(optional_parameters[key]))
@@ -284,6 +288,9 @@ class SNMPListener(ListenerServerModule, ServerModule):
             fields[NotificationFields.protocol] = str(self.get_protocol_name())
             fields[NotificationFields.description] =\
                     unicode(SNMPUtils.parse_description(optional_parameters))
+            fields[NotificationFields.short_description] =\
+                    u'SNMPv2c/SNMPv3 Notification'
+            fields[NotificationFields.is_report] = False
             fields[NotificationFields.notification_type] =\
                     str(NotificationTypes.unknown)
 
@@ -371,7 +378,14 @@ class SNMPListener(ListenerServerModule, ServerModule):
 
 
     def listen(self):
-        reactor.listenUDP(self.port, SNMPDatagramProtocol(self))
+        logging.info('SNMPListener: Trying to listen UDP on port %s',\
+                     str(self.port))
+        try:
+            reactor.listenUDP(self.port, SNMPDatagramProtocol(self))
+            logging.info('SNMPListener: Listening on port %s', str(self.port))
+        except:
+            logging.error('SNMPListener: Failed to listen on port %s',\
+                          str(self.port))
 
 
     def _assert_user_in_database(self, user_name):

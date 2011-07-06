@@ -19,6 +19,7 @@
 import logging
 import time
 import os
+import random
 
 from umit.inventory.Configuration import InventoryConfig
 
@@ -42,8 +43,8 @@ def init_logger(configs, l=logging.WARNING, log_to_console=False):
         # if the path is valid.
         pass
 
-    # Files are named by the time the process started
-    f_name = str(int(time.time())) + '.log'
+    # Files are named by the time the process started + a random salt
+    f_name = str(int(time.time())) + str(int(random.random() * 10000)) + '.log'
     full_path = os.path.join(log_path, f_name)
 
     # Config the logger

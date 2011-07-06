@@ -27,16 +27,23 @@ class Notification:
     accepted to be stored in the database.
 
     Standard fields:
-    * source_host: The host that generated the notification.
-    * timestamp: When the notification was generated. Should be a float similar
-      to the one obtained by time().
-    * protocol: The name of the protocol used by the listener. E.g. SNMP,
-      UmitAgent, etc.
-    * fields_class: The name of the class that defines the fields for the
-      notification. Should NOT be added manually.
-    * notification_type: The type of the notification. See
-      umit.inventory.common.NotificationTypes.
-    * description: A short description of the notification.
+
+    * source_host_ipv4: Source host IPv4 (or '' if not defined)
+    * source_host_ipv6: Source host IPv6 (or '' if not defined)
+    * hostname: Source host name (or '' if not defined)
+    * timestamp: The number of seconds since the epoch when the notification
+      was generated.
+    * protocol: The name of the protocol which generated the notification. E.g.
+      SNMP, UmitAgent, etc.
+    * fields_class: The name of the class that defines the fields included in
+      the notification.
+    * notification_type: The type of the notification. E.g. WARNING, CRITICAL,
+      INFO, etc.
+    * is_report: True if it's a report sent from a fixed time by the host. This
+      indicates that the notification shouldn't be treated as an alarm.
+    * description: A detailed description of the notification.
+    * short_description: A short description of the notification (maximum
+      160 chars)
 
     For the types of these fields, see NotificationFields. The values of these
     fields can be found in the object property fields which is a dictionary
@@ -53,9 +60,8 @@ class Notification:
 
         # Save the fields and check they are correct
         self.fields = fields
-        self.sanity_check()
-
         self.fields[NotificationFields.fields_class] = self.get_name()
+        self.sanity_check()
 
 
     def sanity_check(self):
@@ -119,19 +125,25 @@ class NotificationFields:
     protocol = 'protocol'
     fields_class = 'fields_class'
     notification_type = 'event_type'
+    is_report = 'is_report'
     description = 'description'
-    names = [source_host_ipv4, source_host_ipv6, timestamp, protocol,\
-             notification_type, description]
+    short_description = 'short_description'
+    names = [source_host_ipv4, source_host_ipv6, hostname, timestamp, protocol,\
+             fields_class, notification_type, is_report, description,\
+             short_description]
 
     # The notification fields types.
     types = dict()
     types[source_host_ipv4] = str
     types[source_host_ipv6] = str
+    types[hostname] = str
     types[timestamp] = float
     types[protocol] = str
     types[fields_class] = str
     types[notification_type] = str
+    types[is_report] = bool
     types[description] = unicode
+    types[short_description] = unicode
 
 
     @staticmethod
@@ -159,7 +171,7 @@ class IncorrectNotificationFieldType(Exception):
 
     def __init__(self, field_name, field_crt_type, field_correct_type,\
             notification_class_name):
-        self.err_msg = 'Field %s got type %s for class %s. Expected %s.' %\
+        self.err_msg = 'Field %s has type %s for class %s. Expected %s.' %\
                 (field_name, str(field_crt_type), notification_class_name,\
                  str(field_correct_type))
 
