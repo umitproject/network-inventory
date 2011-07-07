@@ -52,7 +52,7 @@ class NIUIManager(gobject.GObject):
         self.conf = conf
 
         self.logged_in = False
-
+        
         # Basic widgets initialization
         self.main_window = None
         self.auth_window = None
@@ -66,6 +66,17 @@ class NIUIManager(gobject.GObject):
         builder = gtk.Builder()
         builder.add_from_file(ni_main_window_file)
         self.main_window = builder.get_object('ni_main_window')
+
+        self.ni_notebook = builder.get_object('ni_notebook')
+        self.ni_toolbar = builder.get_object('ni_toolbar')
+        self.ni_statusbar = builder.get_object('ni_statusbar')
+        self.ni_menubar = builder.get_object('ni_menubar')
+
+        self.ni_notebook.remove_page(2)
+        self.ni_notebook.remove_page(1)
+        self.ni_notebook.remove_page(0)
+
+        self.main_window.connect('destroy', self.on_main_window_destroyed)
 
 
     def init_auth_window(self):
@@ -99,6 +110,17 @@ class NIUIManager(gobject.GObject):
                                          buttons=gtk.BUTTONS_OK)
         error_dialog.set_property('text', error_second_title)
         error_dialog.set_title('Authentication Error')
+        error_dialog.set_property('secondary-text', error_msg)
+        error_dialog.run()
+        error_dialog.destroy()
+
+
+    def show_run_state_error(self, error_msg, error_second_title):
+        error_dialog = gtk.MessageDialog(parent=self.main_window,\
+                                         type=gtk.MESSAGE_ERROR,\
+                                         buttons=gtk.BUTTONS_OK)
+        error_dialog.set_property('text', error_second_title)
+        error_dialog.set_title('Runtime Error')
         error_dialog.set_property('secondary-text', error_msg)
         error_dialog.run()
         error_dialog.destroy()
@@ -171,7 +193,11 @@ class NIUIManager(gobject.GObject):
     def init_events_view(self):
         builder = gtk.Builder()
         builder.add_from_file(ni_events_view_file)
+        self.events_view_manager = EventsViewManager(builder)
         self.events_view = builder.get_object('events_view_top')
+        self.events_view.unparent()
+        self.ni_notebook.insert_page(self.events_view,\
+                                     gtk.Label('Network Events'), 0)
 
 
     def set_login_state(self):
@@ -203,6 +229,118 @@ class NIUIManager(gobject.GObject):
             self.emit('login', username, password, host, port, enable_ssl)
 
 
-    def on_auth_window_destroyed(self, main_window):
+    def on_auth_window_destroyed(self, auth_window):
         if not self.logged_in:
             self.emit('shutdown')
+
+
+    def on_main_window_destroyed(self, main_window):
+        self.emit('shutdown')
+
+
+
+class EventsViewManager(gobject.GObject):
+
+    events_shown_options = {25 : 'Most Recent 25',\
+                            50 : 'Most Recent 50',\
+                            75 : 'Most Recent 75',\
+                            100 : 'Most Recent 100'}
+
+
+    def __init__(self, builder):
+        gobject.GObject.__init__(self)
+
+        # Get objects
+        self.events_view = builder.get_object('events_view_top')
+        self.events_tree_view = builder.get_object('events_tree_view')
+        self.find_events_button = builder.get_object('find_events_button')
+        self.receive_events_button = builder.get_object('receive_events_button')
+        self.filter_button = builder.get_object('filter_button')
+        self.source_host_cbox = builder.get_object('source_host_cbox')
+        self.events_shown_cbox = builder.get_object('events_shown_cbox')
+        self.all_cb = builder.get_object('all_checkbox')
+        self.info_cb = builder.get_object('info_checkbox')
+        self.recovery_cb = builder.get_object('recovery_checkbox')
+        self.warning_cb = builder.get_object('warning_checkbox')
+        self.security_cb = builder.get_object('security_checkbox')
+        self.critical_cb = builder.get_object('critical_checkbox')
+        self.unknown_cb = builder.get_object('unknown_checkbox')
+
+        # For faster checking/unchecking
+        self.cb_list = [self.info_cb, self.recovery_cb, self.warning_cb,\
+                        self.security_cb, self.critical_cb, self.unknown_cb]
+
+        self.init_events_shown()
+        self.init_handlers()
+
+
+    def init_events_shown(self):
+        self.events_shown = 0
+        self.events_shown_model = gtk.ListStore(gobject.TYPE_STRING)
+        cell = gtk.CellRendererText()
+        self.events_shown_cbox.pack_start(cell, True)
+        self.events_shown_cbox.add_attribute(cell, 'text', 0)
+        for option_key in self.events_shown_options.keys():
+            option_val = self.events_shown_options[option_key]
+
+            iter = self.events_shown_model.append()
+            print option_val
+            self.events_shown_model.set(iter, 0, option_val)
+            if self.events_shown is 0:
+                self.events_shown = option_key
+        self.events_shown_cbox.set_active(0)
+        self.events_shown_cbox.set_model(self.events_shown_model)
+
+
+    def init_handlers(self):
+        self.find_events_button.connect('clicked',\
+                self.on_find_events_button_clicked)
+        self.receive_events_button.connect('toggled',\
+                self.on_receive_events_button_toggled)
+        self.filter_button.connect('clicked',\
+                self.on_filter_button_clicked)
+        self.all_cb.connect('toggled', self.on_all_cb_toggled)
+        self.info_cb.connect('toggled', self.on_not_all_cb_toggled)
+        self.warning_cb.connect('toggled', self.on_not_all_cb_toggled)
+        self.recovery_cb.connect('toggled', self.on_not_all_cb_toggled)
+        self.critical_cb.connect('toggled', self.on_not_all_cb_toggled)
+        self.security_cb.connect('toggled', self.on_not_all_cb_toggled)
+        self.unknown_cb.connect('toggled', self.on_not_all_cb_toggled)
+
+
+    def checkbuttons_active(self):
+        for cb in self.cb_list:
+            if not cb.get_active():
+                return False
+        return True
+
+
+    def on_find_events_button_clicked(self, find_events_button):
+        pass
+
+
+    def on_receive_events_button_toggled(self, receive_events_button):
+        pass
+
+
+    def on_filter_button_clicked(self, filter_button):
+        pass
+
+
+    def on_all_cb_toggled(self, all_cb):
+        active = all_cb.get_active()
+
+        if active:
+            for cb in self.cb_list:
+                cb.set_active(True)
+        elif self.checkbuttons_active():
+            for cb in self.cb_list:
+                cb.set_active(False)
+
+
+    def on_not_all_cb_toggled(self, cb):
+        active = cb.get_active()
+        if not active:
+            self.all_cb.set_active(False)
+        elif self.checkbuttons_active():
+            self.all_cb.set_active(True)

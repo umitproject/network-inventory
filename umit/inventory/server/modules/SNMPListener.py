@@ -574,7 +574,7 @@ class SNMPUtils:
         else:
             fields[NotificationFields.source_host_ipv6] = host_ip
 
-        fields[NotificationFields.hostname] = socket.gethostbyaddr(host_ip)
+        fields[NotificationFields.hostname] = socket.gethostbyaddr(host_ip)[0]
 
 
 

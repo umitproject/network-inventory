@@ -52,13 +52,14 @@ class ServerCore:
         self.shell = ServerShell(self)
         self.database.shell = self.shell
 
+        self.modules = {}
+        self._load_modules()
+        
         self.user_system = UserSystem(self.database)
         self.server_interface = ServerInterface(self.configs,\
                                                 self.user_system, self.shell)
         self.shell.server_interface = self.server_interface
 
-        self.modules = {}
-        self._load_modules()
 
         logging.info('Initialized ServerCore')
 
@@ -69,6 +70,7 @@ class ServerCore:
 
         logging.info('Loading modules ...')
         for module_name in modules_names:
+            logging.info('Trying to initialize %s ...', module_name)
             if not self.configs.module_get_enable(module_name):
                 continue
             try:

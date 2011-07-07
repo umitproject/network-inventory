@@ -22,7 +22,7 @@ from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.common import message_delimiter
-from umit.inventory.server.Module import SubscriberServerModule
+from umit.inventory.server.Module import ListenerServerModule
 
 from twisted.internet import reactor
 from twisted.internet.protocol import Factory
@@ -41,7 +41,6 @@ import os
 import string
 from random import choice
 from threading import Thread
-from threading import Semaphore
 from threading import Lock
 from collections import deque
 
@@ -67,17 +66,26 @@ class ServerInterface:
         self.conf = conf
         self.shell = shell
         self.requests_port =\
-                int(self.conf.get_general_option(ServerConfig.interface_port))
+            int(self.conf.get_general_option(ServerConfig.interface_port))
         self.force_interface_encrypt =\
-                self.conf.get_general_option(ServerConfig.force_interface_encrypt)
+            bool(self.conf.get_general_option(ServerConfig.force_interface_encrypt))
 
         self._generate_ssl_files()
+
+        # Get the name of the protocols which are listening on the server
+        # and are enabled.
+        modules = self.shell.get_modules_list()
+        self.protocols = []
+        for module in modules:
+            if isinstance(module, ListenerServerModule):
+                self.protocols.append(module.get_protocol_name())
 
         ServerInterfaceSSLProtocol.server_interface = self
 
         # Dictionary mapping request types to their evaluating functions
         self.request_eval_func = {\
             'SUBSCRIBE' : self.evaluate_subscribe_request,\
+            'UNSUBSCRIBE' : self.evaluate_unsubscribe_request,\
             'GET_MODULES' : self.evaluate_get_modules_request,\
             'GET_CONFIGS' : self.evaluate_get_configs_request,\
             'SET_CONFIGS' : self.evaluate_set_configs_request,\
@@ -94,8 +102,9 @@ class ServerInterface:
         # Dictionary mapping users to connections
         self.users_connections = {}
 
-        # Users which are subscribed to notifications
-        self.subscribed_users = []
+        # Users which are subscribed to notifications.
+        # username : SubscribedUserContext
+        self.subscribed_users = {}
 
 
     @staticmethod
@@ -173,19 +182,29 @@ class ServerInterface:
 
     def forward_notification(self, notification):
         """ Called when the Server receives a notification """
-        for username in self.subscribed_users:
-            user_connection = self.users_connections[username]
+        msg = self.build_accepted_response(-1)
+        msg[ResponseFields.response_type] = 'SUBSCRIBE_RESPONSE'
+        msg[ResponseFields.body] = notification.fields
+        msg = json.dumps(msg)
+        print 'forwarding ...'
 
+        for username in self.subscribed_users.keys():
+            user_connection = self.users_connections[username]
+            print username
             # If the connection died, remove it
             if user_connection.shutdown:
-                self.subscribed_users.remove(username)
+                del self.subscribed_users[username]
                 del self.users_connections[username]
                 continue
-
+            print 'wtf'
+            # If we should send it in this context
+            user_context = self.subscribed_users[username]
+            if not user_context.should_send_notification(notification):
+                continue
+            print 'orly'
             # Forward the notification (if not a report) to the user
             if notification.fields[NotificationFields.is_report] is False:
-                message = json.dumps(notification.fields)
-                user_connection.send_message(message)
+                user_connection.send_message(msg)
 
         
     def get_connection(self, username):
@@ -206,7 +225,8 @@ class ServerInterface:
 
         token = self.generate_token()
                 
-        connection = InterfaceDataConnection(token, encrypt_enabled)
+        connection = InterfaceDataConnection(token, username, encrypt_enabled)
+        self.users_connections[username] = connection
         connection.start()
 
         # Build the response
@@ -218,6 +238,7 @@ class ServerInterface:
         connect_body[ConnectResponseBody.data_port] = connection.get_port()
         connect_body[ConnectResponseBody.permissions] =\
             user.permissions.serialize()
+        connect_body[ConnectResponseBody.protocols] = self.protocols
         response[ResponseFields.body] = connect_body
 
         return str(json.dumps(response))
@@ -225,12 +246,34 @@ class ServerInterface:
 
     def evaluate_subscribe_request(self, request, connection):
         username = request.get_username()
+        print 'subscribe request from %s' % username
+        user = self.user_system.get_user(username)
         req_id = request.get_request_id()
+        general_request = GeneralRequest(request)
+        if not general_request.sanity_check():
+            return
+        subscribe_request = SubscribeGeneralRequest(general_request)
+        if not subscribe_request.sanity_check():
+            return
 
-        if username not in self.subscribed_users:
-            self.subscribed_users.append(username)
+        types = subscribe_request.get_types()
+        hosts = subscribe_request.get_hosts()
+        protocol = subscribe_request.get_protocol()
+
+        self.subscribed_users[username] = SubscribedUserContext(user,\
+                protocol, types, hosts)
         ok_response = self.build_accepted_response(req_id)
-        connection.send_message(json.dumps(ok_response))
+        connection.send_message(json.dumps(ok_response), True)
+
+
+    def evaluate_unsubscribe_request(self, request, connection):
+        username = request.get_username()
+        req_id = request.get_request_id()
+        if username in self.subscribed_users.keys():
+            del self.subscribed_users[username]
+
+        ok_response = self.build_accepted_response(req_id)
+        connection.send_message(json.dumps(ok_response), True)
 
 
     def evaluate_get_modules_request(self, request, connection):
@@ -332,8 +375,7 @@ class ServerInterface:
                 return None
 
             # Run the evaluation function for this request
-            self.request_eval_func[general_request_type](username,\
-                    connection, request_id)
+            self.request_eval_func[general_request_type](request, connection)
 
         return None
 
@@ -405,6 +447,65 @@ class ServerInterface:
         except:
             logging.error('ServerInterface: Failed to listen SSL on port %s',\
                           str(self.requests_port), exc_info=True)
+
+
+
+class SubscribedUserContext:
+    """
+    One object of this type will exist for each subscribed user.
+    It describes which notifications should be sent for that user.
+    """
+
+    def __init__(self, user, protocol, types, hosts):
+        """
+        user: A User object for this context.
+        protocols: A string describing for which protocol the notifications
+        should be sent (or 'ALL' for all protocols).
+        types: A list of types for which the notifications should be forwarded
+        (or [] for all types).
+        hosts: A list of hosts for which the notifications should be forwarded
+        (or [] for all hosts).
+        """
+        print protocol
+        print types
+        print hosts
+        self.user = user
+        self.protocol = protocol
+        self.all_protocols = (self.protocol == 'ALL')
+        self.types = types
+        self.all_types = (self.types == [])
+        self.hosts = hosts
+        self.all_hosts = (self.hosts == [])
+
+        print self.all_hosts
+        print self.all_protocols
+        print self.all_types
+
+
+    def should_send_notification(self, notification):
+        if not self.all_protocols:
+            notification_protocol =\
+                    notification.fields[NotificationFields.protocol]
+            if notification_protocol != self.protocol:
+                return False
+
+        if not self.all_types:
+            notification_type =\
+                    notification.fields[NotificationFields.notification_type]
+            if notification_type not in self.types:
+                return False
+
+        if not self.all_hosts:
+            hostname = notification.fields[NotificationFields.hostname]
+            ipv4_addr = notification.fields[NotificationFields.source_host_ipv4]
+            ipv6_addr = notification.fields[NotificationFields.source_host_ipv6]
+
+            if hostname not in self.hosts and ipv4_addr not in self.hosts and\
+                ipv6_addr not in self.hosts:
+                return False
+
+        # TODO test permissions
+        return True
 
 
 
@@ -582,12 +683,60 @@ class ConnectGeneralRequest:
             err_msg = 'ServerInterface: Missing encrypt_enabled field from'
             err_msg += ' connect request'
             logging.warning(err_msg)
+            return False
 
         return True
 
 
     def get_encryption_enabled(self):
         return self.encryption_enabled
+
+
+
+class SubscribeGeneralRequest:
+
+    def __init__(self, general_request):
+        self.body = general_request.get_body()
+
+
+    def sanity_check(self):
+        try:
+            self.protocol = self.body[SubscribeGeneralRequestBody.protocol]
+        except:
+            err_msg = 'ServerInterface: Missing protocol field from'
+            err_msg += ' subscribe request'
+            logging.warning(err_msg)
+            return False
+
+        try:
+            self.hosts = self.body[SubscribeGeneralRequestBody.hosts]
+        except:
+            err_msg = 'ServerInterface: Missing hosts field from'
+            err_msg += ' subscribe request'
+            logging.warning(err_msg)
+            return False
+
+        try:
+            self.types = self.body[SubscribeGeneralRequestBody.types]
+        except:
+            err_msg = 'ServerInterface: Missing types field from'
+            err_msg += ' subscribe request'
+            logging.warning(err_msg)
+            return False
+
+        return True
+
+
+    def get_protocol(self):
+        return self.protocol
+
+
+    def get_hosts(self):
+        return self.hosts
+
+
+    def get_types(self):
+        return self.types
 
 
 
@@ -598,31 +747,32 @@ class InterfaceDataConnection(Thread):
     sent.
     """
 
-    timeout = 30.0
-    max_messages = 5
+    timeout = 10.0
+    max_messages = 2
 
-    min_port_value = 10000
+    min_port_value = 10001
     max_port_value = 30000
 
     max_failed_tokens = 5
 
 
-    def __init__(self, token, encrypt_enabled=True):
+    def __init__(self, token, username, encrypt_enabled=True):
         """
         token: The Connection first expects a token from the other side to make
         sure it's the authenticated user.
+        username: Username owning the connection.
         encrypt_enabled: If the data port should be encrypted.
         """
         Thread.__init__(self)
         self.token = token
         self.daemon = True
-        self.connect_semaphore = Semaphore(0)
+        self.username = username
 
         # This will be True when the connection is no longer valid
         self.shutdown = False
-        
+
         self.encrypt_enabled = encrypt_enabled
-        
+
         self.message_queue = deque()
         self.message_queue_lock = Lock()
         self.last_sent_time = time.time()
@@ -645,7 +795,7 @@ class InterfaceDataConnection(Thread):
 
         for port in range(self.min_port_value, self.max_port_value):
             try:
-                self.token_socket.bind((socket.gethostname(), port))
+                self.token_socket.bind(('0.0.0.0', port))
             except:
                 continue
             self.port = port
@@ -656,43 +806,36 @@ class InterfaceDataConnection(Thread):
             err_msg += ' connection'
             logging.error(err_msg)
             self.shutdown = True
-            self.connect_semaphore.release()
             return
 
         logging.info('ServerInterface: Listening for connections on port %d',\
                      self.port)
-        self.token_socket.listen(5)
-        print 'done ...'
-        print self.token_socket
-        self.connect_semaphore.release()
-        print '--------------------------'
+        self.token_socket.listen(1)
 
 
     def _connect(self):
         """ Connects and checks the token """
-        print 'aici3333'
-        print self.token_socket
+        
         if self.shutdown:
             return
-        print 'errrrr'
+
+        self.token_socket.settimeout(2.0)
         for i in range(self.max_failed_tokens):
-            print 'hmmmmmmmmmmm ....'
-            conn, addr = self.token_socket.accept()
-            print '$$$$$$$$$$$$$$'
-            print conn
-            print addr
+            try:
+                conn, addr = self.token_socket.accept()
+            except:
+                err_msg = 'ServerInterface: Failed accepting connection from %s.'
+                err_msg += ' Try number: %d'
+                logging.error(err_msg, self.username, i + 1, exc_info=True)
+                continue
+
             conn.settimeout(1.0)
             if self.encrypt_enabled:
-                print 'wtf'
                 self.data_socket = ssl.wrap_socket(conn, server_side=True,\
                     keyfile=ServerInterface.key_file_name,\
                     certfile=ServerInterface.cert_file_name)
             else:
-                print 'fuck'
                 self.data_socket = conn
-
-            print '--------------'
-            print self.data_socket
 
             # Get the token
             try:
@@ -708,12 +851,19 @@ class InterfaceDataConnection(Thread):
             # Check the token
             if token == self.token:
                 self.connected = True
+                self.token_socket.close()
                 self.peer_host = addr[0]
                 self.peer_port = addr[1]
                 msg = 'ServerInterface: Received token from %s. Connected.'
                 logging.info(msg, str(addr))
                 self.data_socket.settimeout(0.5)
-                break
+                return
+
+        # If we reached this point, we haven't received the token or we haven't
+        # received any connect request when listening.
+        logging.error('ServerInterface: Failed connecting for %s', self.username)
+        self.token_socket.close()
+        self.shutdown = True
 
 
     def get_port(self):
@@ -752,11 +902,13 @@ class InterfaceDataConnection(Thread):
             return
 
         # Not a real time message
+        print 'in ...'
         self.message_queue_lock.acquire()
         self.message_queue.append(message)
         if not self.connected and len(self.message_queue) > self.max_messages:
             self.message_queue.popleft()
         self.message_queue_lock.release()
+        print '... and out'
 
 
     def check_time(self):
@@ -774,9 +926,11 @@ class InterfaceDataConnection(Thread):
             return
 
         self.message_queue_lock.acquire()
-        sent_data = str(json.dumps(self.message_queue)) + message_delimiter
+        sent_list = list(self.message_queue)
         self.message_queue = []
         self.message_queue_lock.release()
+
+        sent_data = str(json.dumps(sent_list)) + message_delimiter
         if not self._send(sent_data):
             err_msg = 'ServerInterface: Failed to send message to %s:%s'
             logging.warning(err_msg, str(self.peer_host),\
@@ -796,8 +950,13 @@ class InterfaceDataConnection(Thread):
         close_response[ResponseFields.response_code] =\
             ResponseCodes.connection_closed
         sent_data = str(json.dumps(close_response)) + message_delimiter
-        self._send(sent_data)
-        self.data_socket.close()
+
+        try:
+            self._send(sent_data)
+            self.data_socket.close()
+            self.token_socket.close()
+        except:
+            return
 
 
     def _send(self, data):
@@ -826,13 +985,6 @@ class InterfaceDataConnection(Thread):
 
     def run(self):
         # Wait for _listen green light
-        print 'waiting ...'
-        print time.time()
-        self.connect_semaphore.acquire()
-        print 'released ...'
-        print time.time()
-
-        print self.token_socket
 
         self._connect()
         if not self.connected:
@@ -851,9 +1003,7 @@ class InterfaceDataConnection(Thread):
                 break
 
             if self.check_time() or self.check_size():
-                self.message_queue_lock.acquire()
                 self.flush_queue()
-                self.message_queue_lock.release()
             time.sleep(0.5)
 
 
@@ -899,6 +1049,8 @@ class GeneralRequestBody:
         receive notifications as they come. This will ony forward notifications
         which are not reports. See SubscribeGeneralRequestBody for details
         about this request.
+      - "UNSUBSCRIBE": The requesting side wants to stop receiving notifications
+        from the Server. There isn't any associated body for this type.
       - "GET_MODULES": The requesting side wants to know which modules are
         installed and enabled on the Server. There isn't any associated body
         for this request.
@@ -948,8 +1100,9 @@ class SubscribeGeneralRequestBody:
     """
     The mandatory fields in a general request having request_type equal to
     "SUBSCRIBE":
-    * protocols: A list of protocols for which the requesting side wants to
-      receive notifications.
+    * protocol: The protocol for which the server wants to receive
+      notifications. If the value is 'ALL', notifications from all the
+      protocols will be sent.
     * hosts: A list of hosts for which the requesting side wants to receive
       notifications. An element of an list can be:
       - An IPv4 address.
@@ -957,14 +1110,16 @@ class SubscribeGeneralRequestBody:
       - A host name.
       - A network address with it's subnet mask in the form of a string
         (e.g. '192.168.2.0/24')
+      If the list is empty, the requesting side wants to receive notifications
+      from all the hosts for which he has permissions.
     * types: A list of notification types for which the requesting side wants
-      to receive notifications.
+      to receive notifications (or an empty list for all the types).
 
     Note: If a some of the subscription request fields aren't allowed by the
           user permissions, then only notifications that are allowed and
           requested will be sent, discarding the non-allowed requests.
     """
-    protocols = 'protocols'
+    protocol = 'protocol'
     hosts = 'hosts'
     types = 'types'
 
@@ -1115,6 +1270,8 @@ class ResponseFields:
     * response_type: A string showing the response type. This is useful only
       for asynchronous response (request_id == -1). For synchronous responses,
       the request_id is sufficient to determine the type of the response.
+      For 'SUBSCRIBE' asynchronous responses, this field will be set to
+      'SUBSCRIBE_RESPONSE' and the body will contain a list with notifications.
     * body: Based on the request_id which will identify the request type, then
       this will contain the response body. For requests having the 'GENERAL'
       target and based on the 'general_request_type' field, the following
@@ -1147,11 +1304,13 @@ class ConnectResponseBody:
       If the Server is configured to use SSL for the data port, this will be
       True, otherwise it will be equal to the 'enable_encryption' field in
       AuthenticateGeneralRequestBody.
+    * protocols: A list with the listening protocols present on the server.
     """
     permissions = 'permissions'
     data_port = 'data_port'
     encryption_enabled = 'encryption_enabled'
     token = 'token'
+    protocols = 'protocols'
 
 
 class GetModulesResponseBody:

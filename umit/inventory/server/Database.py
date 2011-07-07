@@ -19,6 +19,7 @@
 import pymongo
 
 from umit.inventory.server.Notification import Notification
+from umit.inventory.Configuration import InventoryConfig
 
 import logging
 import json

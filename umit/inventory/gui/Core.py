@@ -20,6 +20,7 @@
 from umit.inventory.gui.Shell import NIShell
 from umit.inventory.gui.ServerCommunicator import NIServerCommunicator
 from umit.inventory.gui.UIManager import NIUIManager
+from umit.inventory.gui.ServerCommunicator import SubscribeRequest
 
 import gtk
 from gobject import GObject
@@ -41,6 +42,7 @@ class NICore(GObject):
         self._load_modules()
         self._init_handlers()
 
+        self.logged_in = False
         self.network_message_recv = False
         
 
@@ -67,11 +69,17 @@ class NICore(GObject):
 
 
     def set_login_success(self, permissions):
-        self.ui_manager.set_run_state()
+        self.logged_in = True
+        gobject.idle_add(self.ui_manager.set_run_state)
+        gobject.idle_add(self.server_communicator.send_request,\
+            SubscribeRequest(self.username, self.password))
 
 
     def set_connection_failed(self):
-        print 'connection failed'
+        msg = 'Fatal Error: Connection closed by the Notifications Server'
+        second_title = 'Shutting Down'
+        gobject.idle_add(self.ui_manager.show_run_state_error, msg, second_title)
+        gobject.idle_add(gtk.main_quit)
 
 
     # Handlers
@@ -83,5 +91,7 @@ class NICore(GObject):
 
 
     def on_login(self, emitting_obj, uname, password, host, port, ssl_enabled):
+        self.username = uname
+        self.password = password
         self.server_communicator.connect(uname, password, host,\
                                          port, ssl_enabled)

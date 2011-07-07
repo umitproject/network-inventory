@@ -37,18 +37,23 @@ class NIServerCommunicator(Thread):
     def __init__(self, core, conf):
         Thread.__init__(self)
 
+        self.daemon = True
+
         self.core = core
+        Request.core = core
         self.connected = False
         self.should_shutdown = False
         self.shutdown_lock = Lock()
-        self.login_semaphore = Semaphore(0)
+        self.semaphore = Semaphore(0)
 
         self.connect_request = False
         self.data_sock = None
         self.buffer = ''
 
         # Mapping request ID's to actual requests
-        self.requests = {}
+        self.sent_requests = {}
+        self.pending_requests = []
+        self.requests_lock = Lock()
 
 
     def run(self):
@@ -61,27 +66,30 @@ class NIServerCommunicator(Thread):
                 break
             self.shutdown_lock.release()
 
+            self.semaphore.acquire()
+
             if not self.connected and self.connect_request:
-                self.attempt_connect_to_server()
+                self._attempt_connect_to_server()
+                if self.connected:
+                    receiver = NIServerCommunicatorReceiver(self.data_sock,\
+                                                            self)
+                    receiver.start()
                 self.connect_request = False
                 time.sleep(0.5)
             elif self.connected:
-                # Get the next message from the server. Test if the server
-                # closed the connection.
-                try:
-                    msg = self._recv(self.data_sock, self.buffer,\
-                                     use_delimiter=True)
-                    print msg
-                except:
-                    self.core.set_connection_closed()
+                self._flush_requests()
 
 
     def shutdown(self):
         self.shutdown_lock.acquire()
         self.should_shutdown = True
-        if not self.connected:
-            self.login_semaphore.release()
+        try:
+            self.data_sock.shutdown(socket.SHUT_RDWR)
+            self.data_sock.close()
+        except:
+            pass
         self.shutdown_lock.release()
+        self.semaphore.release()
 
 
     def connect(self, uname, password, host, port, ssl_enabled):
@@ -91,9 +99,60 @@ class NIServerCommunicator(Thread):
         self.port = port
         self.ssl_enabled = ssl_enabled
         self.connect_request = True
+        self.semaphore.release()
 
 
-    def attempt_connect_to_server(self):
+    def send_request(self, request):
+        if not isinstance(request, Request):
+            return
+        self.requests_lock.acquire()
+        self.pending_requests.append(request)
+        self.requests_lock.release()
+        self.semaphore.release()
+
+
+    def connection_lost(self):
+        """ Called by the NIServerCommunicatorReceiver daemon """
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.core.set_connection_failed()
+        self.shutdown_lock.release()
+        self.semaphore.release()
+
+
+    def handle_message(self, msg):
+        """ Handling a received message from the Server """
+        print msg
+
+
+    def _flush_requests(self):
+        self.requests_lock.acquire()
+        temp_pending_requests = self.pending_requests
+        self.pending_requests = []
+        self.requests_lock.release()
+
+        for request in temp_pending_requests:
+            sent_ok = self._send_msg_to_server(request.serialize())
+            if not sent_ok:
+                request.sending_failed()
+            self.sent_requests[request.request_id] = request
+
+
+    def _send_msg_to_server(self, msg):
+        sock = socket.socket()
+        sock.settimeout(NIServerCommunicator.connect_timeout)
+        sock = ssl.wrap_socket(sock)
+        try:
+            sock.connect((self.host, self.port))
+        except:
+            return False
+
+        send_ok = self._send(sock, msg, True)
+        sock.close()
+        return send_ok
+
+    
+    def _attempt_connect_to_server(self):
         # Initialize the request to send it
         request = ConnectRequest(self.username, self.password,\
                                  self.ssl_enabled)
@@ -115,16 +174,16 @@ class NIServerCommunicator(Thread):
         # Wait for the response
         buffer = ''
         response = self._recv(sock, buffer, use_delimiter=True)
-        print response
         sock.close()
+
         if response is None:
             self.core.set_login_failed('Authentication Denied By Server')
             return
 
-        self.parse_connect_response(response, request.request_id)
+        self._parse_connect_response(response, request.request_id)
 
 
-    def parse_connect_response(self, response, req_id):
+    def _parse_connect_response(self, response, req_id):
         try:
             r = json.loads(response)
         except:
@@ -151,6 +210,7 @@ class NIServerCommunicator(Thread):
             token = body['token']
             data_port = int(body['data_port'])
             encryption_enabled = bool(body['encryption_enabled'])
+            print encryption_enabled
         except:
             self.core.set_login_failed('Bad Response From Server')
             traceback.print_exc()
@@ -161,24 +221,27 @@ class NIServerCommunicator(Thread):
             return
 
         self.data_sock = socket.socket()
+        print encryption_enabled
         if encryption_enabled:
-            print 'aici'
             self.data_sock = ssl.wrap_socket(self.data_sock)
 
         try:
+            print 'connecting to %s:%s' % (str(self.host), str(data_port))
             self.data_sock.connect((self.host, data_port))
             self.data_sock.settimeout(NIServerCommunicator.connect_timeout)
             self._send(self.data_sock, token, False)
-            self.data_sock.settimeout(0)
+            self.data_sock.settimeout(None)
         except:
             self.core.set_login_failed('Connection Closed By Server')
             traceback.print_exc()
             return
 
         self.connected = True
+        self.core.set_login_success(permissions)
 
 
-    def _send(self, sock, data, include_delimiter=True):
+    @staticmethod
+    def _send(sock, data, include_delimiter=True):
         if include_delimiter:
             data = str(data) + message_delimiter
 
@@ -198,7 +261,8 @@ class NIServerCommunicator(Thread):
         return True
 
 
-    def _recv(self, sock, buffer, size=-1, use_delimiter=False):
+    @staticmethod
+    def _recv(sock, buffer, size=-1, use_delimiter=False):
         """
         Only one of size and delimiter must be given:
         * If size is not -1, then it must be a strict positive number and in
@@ -249,10 +313,35 @@ class NIServerCommunicator(Thread):
 
 
 
+class NIServerCommunicatorReceiver(Thread):
+
+    def __init__(self, sock, server_communicator):
+        Thread.__init__(self)
+        self.sock = sock
+        self.sock.settimeout(None)
+        self.daemon = True
+        self.buffer = ''
+        self.server_communicator = server_communicator
+
+
+    def run(self):
+        while True:
+            msg = self.sock.recv()
+            msg = NIServerCommunicator._recv(self.sock, self.buffer,\
+                                             use_delimiter=True)
+            if msg is not None:
+                self.server_communicator.handle_message(msg)
+            else:
+                self.server_communicator.connection_lost()
+                break
+
+
+
 class Request:
     """ A Request to be sent to the Notifications Server """
 
     last_sent_req_id = 0
+    core = None
 
     def __init__(self, username, password, body, target='GENERAL'):
         self.username = username
@@ -282,6 +371,15 @@ class Request:
         pass
 
 
+    def sending_failed(self):
+        """
+        Called when the failing of the request failed.
+        Should be overwritten if needed.
+        By default, it exists the application.
+        """
+        self.core.set_connection_failed()
+
+
 
 class ConnectRequest(Request):
 
@@ -295,3 +393,21 @@ class ConnectRequest(Request):
         general_request['general_request_body'] = connect_general_request
 
         Request.__init__(self, username, password, general_request)
+
+
+class SubscribeRequest(Request):
+
+    def __init__(self, username, password, types=list(),\
+                 hosts=list(), protocol='ALL'):
+
+        subscribe_general_request = dict()
+        subscribe_general_request['hosts'] = hosts
+        subscribe_general_request['types'] = types
+        subscribe_general_request['protocol'] = protocol
+
+        general_request = dict()
+        general_request['general_request_type'] = 'SUBSCRIBE'
+        general_request['general_request_body'] = subscribe_general_request
+
+        Request.__init__(self, username, password, general_request)
+        

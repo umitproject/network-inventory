@@ -89,12 +89,23 @@ class InventoryConfig(ConfigParser):
         else:
             config_file = open(self.config_file_path)
             self.readfp(config_file)
-
+    
 
     def save_settings(self):
         """Saves the settings in the file located at self.config_file_path"""
         config_file = open(self.config_file_path, 'w')
         self.write(config_file)
+
+
+    def get(self, section, option):
+        """ Used to ensure boolean sanity """
+        if not self.has_option(section, option):
+            return None
+
+        value = ConfigParser.get(self, section, option)
+        if value in ('False', 'false'):
+            return False
+        return value
 
 
     # General options methods
@@ -122,7 +133,7 @@ class InventoryConfig(ConfigParser):
         for section in self.sections():
             # Check if the section is a module
             if self.has_option(section, is_module_option) and\
-                self.getboolean(section, is_module_option):
+                bool(self.get(section, is_module_option)):
                 modules_list.append(section)
         return modules_list
 
@@ -144,7 +155,7 @@ class InventoryConfig(ConfigParser):
         if not self.module_is_installed(module_name):
             raise InventoryConfig.ModuleNotInstalled(module_name)
 
-        return self.getboolean(module_name, InventoryConfig.module_enabled)
+        return bool(self.get(module_name, InventoryConfig.module_enabled))
 
 
     def module_set_enable(self, module_name, enable_value=True):

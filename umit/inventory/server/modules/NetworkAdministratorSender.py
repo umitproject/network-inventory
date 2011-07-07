@@ -69,7 +69,7 @@ class NetworkAdministratorSender(ServerModule, SubscriberServerModule):
         """
         self.dispatcher.add_notification(notification)
 
-        
+
     def subscribe(self):
         # Subscribing to all notifications
         self.shell.subscribe(self)
