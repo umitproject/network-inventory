@@ -120,12 +120,13 @@ class NIUIManager(gobject.GObject):
     def show_auth_state_error(self, error_msg, error_second_title):
         error_dialog = gtk.MessageDialog(parent=self.auth_window,\
                                          type=gtk.MESSAGE_ERROR,\
+                                         flags=gtk.DIALOG_MODAL,\
                                          buttons=gtk.BUTTONS_OK)
         error_dialog.set_property('text', error_second_title)
         error_dialog.set_title('Authentication Error')
         error_dialog.set_property('secondary-text', error_msg)
-        error_dialog.run()
-        error_dialog.destroy()
+        error_dialog.connect('response', self.on_dialog_response)
+        error_dialog.show()
 
 
     def show_run_state_error(self, error_msg, error_second_title):
@@ -135,8 +136,12 @@ class NIUIManager(gobject.GObject):
         error_dialog.set_property('text', error_second_title)
         error_dialog.set_title('Runtime Error')
         error_dialog.set_property('secondary-text', error_msg)
-        error_dialog.run()
-        error_dialog.destroy()
+        error_dialog.connect('response', self.on_dialog_response)
+        error_dialog.show()
+
+
+    def on_dialog_response(self, dialog, response_id):
+        dialog.destroy()
 
 
     def init_auth_window_text_entries(self):
@@ -381,7 +386,7 @@ class EventsViewManager(gobject.GObject):
             source_host += '(%s)' % ipv6
 
         iter = self.events_model.prepend()
-        print 'aici'
+
         self.events_model.set(iter,\
                               self.TREE_MODEL_COL_HOST, copy(source_host),\
                               self.TREE_MODEL_COL_TYPE, copy(notif_type),\
@@ -394,8 +399,6 @@ class EventsViewManager(gobject.GObject):
     @staticmethod
     def tree_model_visible_func(model, iter, user_data):
         events_view_manager = user_data
-        print model
-        print iter
 
         # TODO host data
         notif_type = model.get_value(iter, EventsViewManager.TREE_MODEL_COL_TYPE)

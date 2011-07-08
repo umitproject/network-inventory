@@ -66,9 +66,8 @@ class NIServerCommunicator(Thread):
                 self.shutdown_lock.release()
                 break
             self.shutdown_lock.release()
-
+            
             self.semaphore.acquire()
-
             if not self.connected and self.connect_request:
                 self._attempt_connect_to_server()
                 if self.connected:
@@ -198,11 +197,15 @@ class NIServerCommunicator(Thread):
             sock.connect((self.host, self.port))
         except:
             self.core.set_login_failed('Notifications Server Not Reachable')
+            sock.close()
+            return
 
         send_ok = self._send(sock, request.serialize(), True)
-        print send_ok
+
         if not send_ok:
             self.core.set_login_failed('Notifications Server Not Reachable')
+            sock.close()
+            return
 
         # Wait for the response
         buffer = ''
@@ -244,7 +247,6 @@ class NIServerCommunicator(Thread):
             data_port = int(body['data_port'])
             encryption_enabled = bool(body['encryption_enabled'])
             protocols = body['protocols']
-            print encryption_enabled
         except:
             self.core.set_login_failed('Bad Response From Server')
             traceback.print_exc()
@@ -255,7 +257,6 @@ class NIServerCommunicator(Thread):
             return
 
         self.data_sock = socket.socket()
-        print encryption_enabled
         if encryption_enabled:
             self.data_sock = ssl.wrap_socket(self.data_sock)
 
