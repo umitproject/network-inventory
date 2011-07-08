@@ -52,6 +52,7 @@ class NIServerCommunicator(Thread):
 
         # Mapping request ID's to actual requests
         self.sent_requests = {}
+        self.sent_requests_lock = Lock()
         self.pending_requests = []
         self.requests_lock = Lock()
 
@@ -121,8 +122,38 @@ class NIServerCommunicator(Thread):
 
 
     def handle_message(self, msg):
-        """ Handling a received message from the Server """
+        """ Called when a request is received from the Server """
         print msg
+        try:
+            msg = json.loads(msg)
+        except:
+            traceback.print_exc()
+            return
+
+        for response in msg:
+            try:
+                response = json.loads(response)
+            except:
+                traceback.print_exc()
+                continue
+
+            try:
+                req_id = int(response['request_id'])
+            except:
+                traceback.print_exc()
+                continue
+
+            # Asynchronous response
+            if req_id == -1:
+                self.core.set_async_message_received(response)
+            else:
+                self.sent_requests_lock.acquire()
+                try:
+                    self.sent_requests[req_id].handle_response(response)
+                except:
+                    traceback.print_exc()
+                    pass
+                self.sent_requests_lock.release()
 
 
     def _flush_requests(self):
@@ -135,7 +166,9 @@ class NIServerCommunicator(Thread):
             sent_ok = self._send_msg_to_server(request.serialize())
             if not sent_ok:
                 request.sending_failed()
+            self.sent_requests_lock.acquire()
             self.sent_requests[request.request_id] = request
+            self.sent_requests_lock.release()
 
 
     def _send_msg_to_server(self, msg):
@@ -210,6 +243,7 @@ class NIServerCommunicator(Thread):
             token = body['token']
             data_port = int(body['data_port'])
             encryption_enabled = bool(body['encryption_enabled'])
+            protocols = body['protocols']
             print encryption_enabled
         except:
             self.core.set_login_failed('Bad Response From Server')
@@ -237,7 +271,7 @@ class NIServerCommunicator(Thread):
             return
 
         self.connected = True
-        self.core.set_login_success(permissions)
+        self.core.set_login_success(permissions, protocols)
 
 
     @staticmethod
@@ -299,7 +333,7 @@ class NIServerCommunicator(Thread):
             chunk = []
             while message_delimiter not in chunk:
                 try:
-                    chunk = sock.recv(1024)
+                    chunk = sock.recv(4096)
                 except:
                     traceback.print_exc()
                     return None
@@ -326,7 +360,6 @@ class NIServerCommunicatorReceiver(Thread):
 
     def run(self):
         while True:
-            msg = self.sock.recv()
             msg = NIServerCommunicator._recv(self.sock, self.buffer,\
                                              use_delimiter=True)
             if msg is not None:
@@ -363,7 +396,7 @@ class Request:
         return json.dumps(req)
 
 
-    def receive_response(self):
+    def handle_response(self, response):
         """
         Called when a response was received for a request.
         Should be overwritten if needed.
@@ -395,10 +428,11 @@ class ConnectRequest(Request):
         Request.__init__(self, username, password, general_request)
 
 
+
 class SubscribeRequest(Request):
 
     def __init__(self, username, password, types=list(),\
-                 hosts=list(), protocol='ALL'):
+                 hosts=list(), protocol='All'):
 
         subscribe_general_request = dict()
         subscribe_general_request['hosts'] = hosts
@@ -410,4 +444,15 @@ class SubscribeRequest(Request):
         general_request['general_request_body'] = subscribe_general_request
 
         Request.__init__(self, username, password, general_request)
-        
+
+
+
+class UnsubscribeRequest(Request):
+
+    def __init__(self, username, password):
+
+        general_request = dict()
+        general_request['general_request_type'] = 'UNSUBSCRIBE'
+        general_request['general_request_body'] = []
+
+        Request.__init__(self, username, password, general_request)

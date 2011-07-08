@@ -20,8 +20,13 @@
 import os
 import gtk
 import gobject
+import time
+import traceback
+from copy import copy
 
 from umit.inventory.gui.Configs import NIConfig
+from umit.inventory.common import NotificationTypes
+
 
 # TODO needs refactoring
 glade_files_path = os.path.join('umit', 'inventory', 'gui', 'glade_files')
@@ -37,12 +42,20 @@ class NIUIManager(gobject.GObject):
         "shutdown": (gobject.SIGNAL_RUN_FIRST,
                      gobject.TYPE_NONE,
                      ()),
-
         # Emitted when the user enters valid arguments in the login window
         # Parameters: username, password, host, port, ssl_enabled
         "login": (gobject.SIGNAL_RUN_FIRST,
                   gobject.TYPE_NONE,
                   (str, str, str, int, bool)),
+        # Emitted when the user wants to subscribe with the given options.
+        # Parameters: protocol, hosts (list), types (list)
+        "subscribe": (gobject.SIGNAL_RUN_FIRST,
+                      gobject.TYPE_NONE,
+                      (str, gobject.TYPE_PYOBJECT, gobject.TYPE_PYOBJECT)),
+        # Emitted when the user wants to unsubscribe.
+        "unsubscribe": (gobject.SIGNAL_RUN_FIRST,
+                        gobject.TYPE_NONE,
+                        ()),
         }
 
 
@@ -193,7 +206,7 @@ class NIUIManager(gobject.GObject):
     def init_events_view(self):
         builder = gtk.Builder()
         builder.add_from_file(ni_events_view_file)
-        self.events_view_manager = EventsViewManager(builder)
+        self.events_view_manager = EventsViewManager(builder, self)
         self.events_view = builder.get_object('events_view_top')
         self.events_view.unparent()
         self.ni_notebook.insert_page(self.events_view,\
@@ -211,6 +224,16 @@ class NIUIManager(gobject.GObject):
         self.auth_window.destroy()
         
         self.main_window.show()
+
+
+    def add_events_view_notification(self, notification):
+        """ Shows the notification in the Events Tree View """
+        self.events_view_manager.add_notification(notification)
+
+
+    def set_protocols(self, protocols):
+        """ Sets the protocols that will be shown in the GUI """
+        self.events_view_manager.set_protocols(protocols)
 
 
     # Login state handlers
@@ -241,15 +264,26 @@ class NIUIManager(gobject.GObject):
 
 class EventsViewManager(gobject.GObject):
 
-    events_shown_options = {25 : 'Most Recent 25',\
-                            50 : 'Most Recent 50',\
-                            75 : 'Most Recent 75',\
-                            100 : 'Most Recent 100'}
+    events_shown_options = {'Most Recent 25' : 25,\
+                            'Most Recent 50' : 50,\
+                            'Most Recent 75' : 75,\
+                            'Most Recent 100' : 100}
+
+    TREE_MODEL_COL_HOST = 0
+    TREE_MODEL_COL_TYPE = 1
+    TREE_MODEL_COL_TIME = 2
+    TREE_MODEL_COL_PROT = 3
+    TREE_MODEL_COL_DESC = 4
+    TREE_MODEL_COL_NOTIF_OBJ = 5
+
+    ALL_PROTOCOLS_SHOWN = 'All'
 
 
-    def __init__(self, builder):
+    def __init__(self, builder, ui_manager):
         gobject.GObject.__init__(self)
-
+        self.events_model = None
+        self.ui_manager = ui_manager
+        
         # Get objects
         self.events_view = builder.get_object('events_view_top')
         self.events_tree_view = builder.get_object('events_tree_view')
@@ -258,6 +292,7 @@ class EventsViewManager(gobject.GObject):
         self.filter_button = builder.get_object('filter_button')
         self.source_host_cbox = builder.get_object('source_host_cbox')
         self.events_shown_cbox = builder.get_object('events_shown_cbox')
+        self.protocols_shown_cbox = builder.get_object('protocols_shown_cbox')
         self.all_cb = builder.get_object('all_checkbox')
         self.info_cb = builder.get_object('info_checkbox')
         self.recovery_cb = builder.get_object('recovery_checkbox')
@@ -269,8 +304,21 @@ class EventsViewManager(gobject.GObject):
         # For faster checking/unchecking
         self.cb_list = [self.info_cb, self.recovery_cb, self.warning_cb,\
                         self.security_cb, self.critical_cb, self.unknown_cb]
+        self.cb_map = {NotificationTypes.info : self.info_cb,\
+                       NotificationTypes.warning : self.warning_cb,\
+                       NotificationTypes.recovery : self.recovery_cb,\
+                       NotificationTypes.security : self.security_cb,\
+                       NotificationTypes.critical : self.critical_cb,\
+                       NotificationTypes.unknown : self.unknown_cb}
+
+        # Filter options
+        self.events_shown = 0
+        self.protocol_shown = self.ALL_PROTOCOLS_SHOWN
+        self.hosts_shown = []
+        self.types_shown = []
 
         self.init_events_shown()
+        self.init_tree_view()
         self.init_handlers()
 
 
@@ -281,15 +329,177 @@ class EventsViewManager(gobject.GObject):
         self.events_shown_cbox.pack_start(cell, True)
         self.events_shown_cbox.add_attribute(cell, 'text', 0)
         for option_key in self.events_shown_options.keys():
-            option_val = self.events_shown_options[option_key]
 
             iter = self.events_shown_model.append()
-            print option_val
-            self.events_shown_model.set(iter, 0, option_val)
+            self.events_shown_model.set(iter, 0, option_key)
             if self.events_shown is 0:
-                self.events_shown = option_key
+                self.events_shown = self.events_shown_options[option_key]
         self.events_shown_cbox.set_active(0)
         self.events_shown_cbox.set_model(self.events_shown_model)
+
+
+    def set_protocols(self, protocols):
+        self.protocols_model = gtk.ListStore(gobject.TYPE_STRING)
+        cell = gtk.CellRendererText()
+        self.protocols_shown_cbox.pack_start(cell, True)
+        self.protocols_shown_cbox.add_attribute(cell, 'text', 0)
+        iter = self.protocols_model.append()
+        self.protocols_model.set(iter, 0, self.ALL_PROTOCOLS_SHOWN)
+        for protocol in protocols:
+            iter = self.protocols_model.append()
+            self.protocols_model.set(iter, 0, protocol)
+        self.protocols_shown_cbox.set_active(0)
+        self.protocols_shown_cbox.set_model(self.protocols_model)
+
+
+    def add_notification(self, notification):
+        # Not initialized the GUI yet
+        if self.events_model is None:
+            return
+
+        # Get the fields
+        try:
+            hostname = str(notification['hostname'])
+            ipv4 = str(notification['source_host_ipv4'])
+            ipv6 = str(notification['source_host_ipv6'])
+            notif_type = str(notification['event_type'])
+            protocol = str(notification['protocol'])
+            timestamp = float(notification['timestamp'])
+            short_desc = str(notification['short_description'])
+        except:
+            traceback.print_exc()
+            return
+
+        # Format the time
+        notif_time = time.ctime(timestamp)
+
+        # Format the source_host
+        source_host = hostname + ' '
+        if ipv4 is not '':
+            source_host += '(%s)' % ipv4
+        elif ipv6 is not '':
+            source_host += '(%s)' % ipv6
+
+        iter = self.events_model.prepend()
+        print 'aici'
+        self.events_model.set(iter,\
+                              self.TREE_MODEL_COL_HOST, copy(source_host),\
+                              self.TREE_MODEL_COL_TYPE, copy(notif_type),\
+                              self.TREE_MODEL_COL_TIME, copy(notif_time),\
+                              self.TREE_MODEL_COL_PROT, copy(protocol),\
+                              self.TREE_MODEL_COL_DESC, copy(short_desc),\
+                              self.TREE_MODEL_COL_NOTIF_OBJ, copy(notification))
+
+
+    @staticmethod
+    def tree_model_visible_func(model, iter, user_data):
+        events_view_manager = user_data
+        print model
+        print iter
+
+        # TODO host data
+        notif_type = model.get_value(iter, EventsViewManager.TREE_MODEL_COL_TYPE)
+        protocol = model.get_value(iter, EventsViewManager.TREE_MODEL_COL_PROT)
+
+        # TODO look into this
+        if notif_type is None or protocol is None:
+            return False
+        
+        # Test the type
+        if events_view_manager.types_shown is not []:
+            if not events_view_manager.cb_map[notif_type].get_active():
+                return False
+
+        # TODO Test the host
+
+        # Test the protocol
+        if events_view_manager.protocol_shown != 'All':
+            if not events_view_manager.protocol_shown != protocol:
+                return False
+
+        return True
+
+
+    def tree_view_col_data_func(self, column, cell, model, iter, model_col):
+        col_text = model.get_value(iter, model_col)
+        row_type = model.get_value(iter, self.TREE_MODEL_COL_TYPE)
+        cell.set_property('text', col_text)
+
+        if row_type == NotificationTypes.critical:
+            cell.set_property('background', '#B50D0D')
+            cell.set_property('foreground', '#FFFFFF')
+        elif row_type == NotificationTypes.warning:
+            cell.set_property('background', '#DB5A5A')
+            cell.set_property('foreground', '#FFFFFF')
+        else:
+            cell.set_property('background-set', False)
+            cell.set_property('foreground-set', False)
+
+
+    def init_tree_view(self):
+        """
+        Tree View columns: Source Host, Type, Time, Protocol, Short Description.
+        """
+        # Init model and it's filter
+        self.events_model = gtk.ListStore(gobject.TYPE_STRING,\
+                gobject.TYPE_STRING, gobject.TYPE_STRING,\
+                gobject.TYPE_STRING, gobject.TYPE_STRING,\
+                gobject.TYPE_PYOBJECT)
+        self.events_filter_model = self.events_model.filter_new()
+        self.events_filter_model.set_visible_func(EventsViewManager.tree_model_visible_func, self)
+
+        # Init tree view
+        self.events_tree_view.set_model(self.events_filter_model)
+
+        # 1. Source Host Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Source Host', cell)
+        col.set_min_width(150)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_HOST)
+        self.events_tree_view.append_column(col)
+
+        # 2. Type Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Event Type', cell)
+        col.set_min_width(100)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_TYPE)
+        self.events_tree_view.append_column(col)
+
+        # 3. Time Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Time', cell)
+        col.set_min_width(140)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_TIME)
+        self.events_tree_view.append_column(col)
+
+        # 4. Protocol Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Protocol', cell)
+        col.set_min_width(110)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_PROT)
+        self.events_tree_view.append_column(col)
+
+        # 5. Short Description Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Short Description', cell)
+        col.set_min_width(250)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_DESC)
+        self.events_tree_view.append_column(col)
 
 
     def init_handlers(self):
@@ -316,15 +526,43 @@ class EventsViewManager(gobject.GObject):
 
 
     def on_find_events_button_clicked(self, find_events_button):
+        #TODO
         pass
 
 
     def on_receive_events_button_toggled(self, receive_events_button):
-        pass
+        if receive_events_button.get_active():
+            self.ui_manager.emit('subscribe', self.protocol_shown,\
+                                 self.hosts_shown, self.types_shown)
+        else:
+            self.ui_manager.emit('unsubscribe')
 
 
     def on_filter_button_clicked(self, filter_button):
-        pass
+        # Get the filtered types
+        self.types_shown = []
+        if not self.all_cb.get_active():
+            for notif_type in self.cb_map.keys():
+                if self.cb_map[notif_type].get_active():
+                    self.types_shown.append(notif_type)
+
+        # Get the filtered hosts
+        # TODO
+        self.hosts_shown = []
+
+        # Get the filtered protocol
+        iter = self.protocols_shown_cbox.get_active_iter()
+        self.protocol_shown = self.protocols_model.get_value(iter, 0)
+
+        # Get the filtered events shown
+        iter = self.events_shown_cbox.get_active_iter()
+        events_shown_str = self.events_shown_model.get_value(iter, 0)
+        self.events_shown = self.events_shown_options[events_shown_str]
+
+        self.events_filter_model.refilter()
+
+        self.ui_manager.emit('subscribe', self.protocol_shown,\
+                             self.hosts_shown, self.types_shown)
 
 
     def on_all_cb_toggled(self, all_cb):

@@ -69,9 +69,13 @@ class TestModule(MonitoringModule):
 
     def _generate_random_type(self):
         # Currently consider 12.5% chances to generate a CRITICAL notification.
-        i = choice(range(8))
+        i = choice(range(5))
         if i is 0:
             return NotificationTypes.critical
+        elif i is 1:
+            return NotificationTypes.warning
+        elif i is 2:
+            return NotificationTypes.security
         else:
             return NotificationTypes.info
 

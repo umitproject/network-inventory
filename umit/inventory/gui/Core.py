@@ -21,10 +21,12 @@ from umit.inventory.gui.Shell import NIShell
 from umit.inventory.gui.ServerCommunicator import NIServerCommunicator
 from umit.inventory.gui.UIManager import NIUIManager
 from umit.inventory.gui.ServerCommunicator import SubscribeRequest
+from umit.inventory.gui.ServerCommunicator import UnsubscribeRequest
 
 import gtk
 from gobject import GObject
 import gobject
+import traceback
 
 gtk.gdk.threads_init()
 
@@ -54,11 +56,26 @@ class NICore(GObject):
     def _init_handlers(self):
         self.ui_manager.connect('shutdown', self.on_shutdown)
         self.ui_manager.connect('login', self.on_login)
+        self.ui_manager.connect('subscribe', self.on_ui_subscribe_request)
+        self.ui_manager.connect('unsubscribe', self.on_ui_unsubscribe_request)
+
 
     def run(self):
         self.server_communicator.start()
         self.ui_manager.set_login_state()
         gtk.main()
+
+
+    def handle_async_message(self, msg):
+        try:
+            response_type = msg['response_type']
+            body = msg['body']
+        except:
+            traceback.print_exc()
+            return
+
+        if response_type == 'SUBSCRIBE_RESPONSE':
+            self.ui_manager.add_events_view_notification(body)
 
 
     # Methods called by the ServerCommunicator
@@ -68,18 +85,23 @@ class NICore(GObject):
                          'Authentication Failed')
 
 
-    def set_login_success(self, permissions):
+    def set_login_success(self, permissions, protocols):
         self.logged_in = True
+        self.permissions = permissions
+        gobject.idle_add(self.ui_manager.set_protocols, protocols)
         gobject.idle_add(self.ui_manager.set_run_state)
         gobject.idle_add(self.server_communicator.send_request,\
             SubscribeRequest(self.username, self.password))
-
 
     def set_connection_failed(self):
         msg = 'Fatal Error: Connection closed by the Notifications Server'
         second_title = 'Shutting Down'
         gobject.idle_add(self.ui_manager.show_run_state_error, msg, second_title)
         gobject.idle_add(gtk.main_quit)
+
+
+    def set_async_message_received(self, msg):
+        gobject.idle_add(self.handle_async_message, msg)
 
 
     # Handlers
@@ -95,3 +117,14 @@ class NICore(GObject):
         self.password = password
         self.server_communicator.connect(uname, password, host,\
                                          port, ssl_enabled)
+
+
+    def on_ui_subscribe_request(self, emitting_obj, protocol, hosts, types):
+        req = SubscribeRequest(self.username, self.password, types,\
+                               hosts, protocol)
+        self.server_communicator.send_request(req)
+
+
+    def on_ui_unsubscribe_request(self, emitting_obj):
+        req = UnsubscribeRequest(self.username, self.password)
+        self.server_communicator.send_request(req)

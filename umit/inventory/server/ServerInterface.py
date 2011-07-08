@@ -190,18 +190,16 @@ class ServerInterface:
 
         for username in self.subscribed_users.keys():
             user_connection = self.users_connections[username]
-            print username
+
             # If the connection died, remove it
             if user_connection.shutdown:
                 del self.subscribed_users[username]
                 del self.users_connections[username]
                 continue
-            print 'wtf'
             # If we should send it in this context
             user_context = self.subscribed_users[username]
             if not user_context.should_send_notification(notification):
                 continue
-            print 'orly'
             # Forward the notification (if not a report) to the user
             if notification.fields[NotificationFields.is_report] is False:
                 user_connection.send_message(msg)
@@ -460,26 +458,19 @@ class SubscribedUserContext:
         """
         user: A User object for this context.
         protocols: A string describing for which protocol the notifications
-        should be sent (or 'ALL' for all protocols).
+        should be sent (or 'All' for all protocols).
         types: A list of types for which the notifications should be forwarded
         (or [] for all types).
         hosts: A list of hosts for which the notifications should be forwarded
         (or [] for all hosts).
         """
-        print protocol
-        print types
-        print hosts
         self.user = user
         self.protocol = protocol
-        self.all_protocols = (self.protocol == 'ALL')
+        self.all_protocols = (self.protocol == 'All')
         self.types = types
         self.all_types = (self.types == [])
         self.hosts = hosts
         self.all_hosts = (self.hosts == [])
-
-        print self.all_hosts
-        print self.all_protocols
-        print self.all_types
 
 
     def should_send_notification(self, notification):
@@ -962,7 +953,6 @@ class InterfaceDataConnection(Thread):
     def _send(self, data):
         if not self.connected:
             return
-        
         total_sent_b = 0
         length = len(data)
         self.data_socket_lock.acquire()
@@ -976,6 +966,7 @@ class InterfaceDataConnection(Thread):
                     return False
                 total_sent_b += sent
         except:
+            self.shutdown = True
             logging.error('ServerInterface: Failed to send data to %s:%s',\
                           str(self.peer_host), str(self.peer_port),\
                           exc_info=True)
@@ -1101,7 +1092,7 @@ class SubscribeGeneralRequestBody:
     The mandatory fields in a general request having request_type equal to
     "SUBSCRIBE":
     * protocol: The protocol for which the server wants to receive
-      notifications. If the value is 'ALL', notifications from all the
+      notifications. If the value is 'All', notifications from all the
       protocols will be sent.
     * hosts: A list of hosts for which the requesting side wants to receive
       notifications. An element of an list can be:
