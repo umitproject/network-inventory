@@ -59,12 +59,12 @@ class DeviceSensor(MonitoringModule):
     notification_cond_file = 'notification_cond_file'
 
     # Module fields
-    uptime = 'device_sensor_uptime'
-    cpu_percent = 'device_sensor_cpu_percent'
-    ram_percent = 'device_sensor_ram_percent'
-    boot_time = 'device_sensor_boot_time_date'
-    net_sent_bytes = 'device_sensor_net_sent_bytes'
-    net_recv_bytes = 'device_sensor_net_recv_bytes'
+    uptime = 'uptime'
+    cpu_percent = 'cpu_percent'
+    ram_percent = 'ram_percent'
+    boot_time = 'boot_time_date'
+    net_sent_bytes = 'net_sent_bytes'
+    net_recv_bytes = 'net_recv_bytes'
 
 
     def __init__(self, configs, agent_main_loop):
@@ -86,6 +86,10 @@ class DeviceSensor(MonitoringModule):
 
     def get_name(self):
         return 'DeviceSensor'
+
+
+    def get_prefix(self):
+        return 'device_sensor'
 
 
     def run(self):
@@ -1134,6 +1138,7 @@ class CpuPercentGenerator(MeasurementGenerator):
         self.cpu_percent.start()
 
     def measure(self):
+        print self.latest_value
         self.latest_value = self.cpu_percent.get_value()
 
 

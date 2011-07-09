@@ -155,8 +155,8 @@ class SNMPListener(ListenerServerModule, ServerModule):
             try:
                 converted_value = ASN1Type.convert_to_python_type(value)
             except Exception, e:
-                #TODO log this
-                traceback.print_exc()
+                err_msg = 'SNMPListener: Failed converting ASN1 to Python type'
+                logging.warning(err_msg, exc_info=True)
                 continue
 
             variables_dict[oid_str] = converted_value
@@ -180,7 +180,9 @@ class SNMPListener(ListenerServerModule, ServerModule):
             fields[NotificationFields.protocol] = str(self.get_protocol_name())
             fields[NotificationFields.description] =\
                     unicode(SNMPUtils.parse_description(variables_dict))
-            fields[NotificationFields.short_description] = u'SNMPv1 Trap'
+            fields[NotificationFields.short_description] =\
+                    u'SNMPv1 Trap. Generic ID: %s. Enterprise ID: %s'\
+                    % (str(generic_trap_id), str(enterprise_trap_id))
             fields[NotificationFields.is_report] = False
             fields[NotificationFields.notification_type] =\
                     str(SNMPUtils.parse_type(generic_trap_id))
@@ -196,8 +198,9 @@ class SNMPListener(ListenerServerModule, ServerModule):
             notification = SNMPv1Notification(fields)
             self.shell.parse_notification(self.get_name(), notification)
         except Exception, e:
-            # TODO log this
-            traceback.print_exc()
+            err_msg = 'SNMPListener: Failed getting fields from SNMPv1 Trap'
+            err_msg += '. Source Host: %s' % agent_address_str
+            logging.warning(err_msg, exc_info=True)
 
 
     def parse_snmpv2_pdu(self, prot_module, trap_pdu, host):
@@ -224,8 +227,8 @@ class SNMPListener(ListenerServerModule, ServerModule):
             try:
                 value = ASN1Type.convert_to_python_type(var_bind[1])
             except Exception, e:
-                # TODO log this
-                traceback.print_exc()
+                err_msg = 'SNMPListener: Failed converting ASN1 to Python type'
+                logging.warning(err_msg, exc_info=True)
                 continue
 
             # Check for SNMPv2 General fields
@@ -258,19 +261,6 @@ class SNMPListener(ListenerServerModule, ServerModule):
         if source_host is None:
             source_host = host
 
-        # TODO delete this
-        print '----------------------------'
-        print 'source_host: %s' % source_host
-        print 'uptime: %s' % uptime
-        print 'trap_oid: %s' % trap_oid
-        print 'enterprise_oid: %s' % trap_enterprise
-        print 'Variables:'
-
-        for key in optional_parameters.keys():
-            print '\t%s = %s (%s)' % (key, optional_parameters[key],\
-                    type(optional_parameters[key]))
-        # TODO until here
-
         # Parse to a Notification object
         fields = dict()
         try:
@@ -289,7 +279,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
             fields[NotificationFields.description] =\
                     unicode(SNMPUtils.parse_description(optional_parameters))
             fields[NotificationFields.short_description] =\
-                    u'SNMPv2c/SNMPv3 Notification'
+                    u'SNMPv2c/SNMPv3 Notification (%s)' % trap_oid
             fields[NotificationFields.is_report] = False
             fields[NotificationFields.notification_type] =\
                     str(NotificationTypes.unknown)
@@ -305,8 +295,9 @@ class SNMPListener(ListenerServerModule, ServerModule):
             notification = SNMPv2cNotification(fields)
             self.shell.parse_notification(self.get_name(), notification)
         except Exception, e:
-            # TODO log this
-            traceback.print_exc()
+            err_msg = 'SNMPListener: Failed getting fields from SNMPv2c Trap'
+            err_msg += '. Source Host: %s' % str(host)
+            logging.warning(err_msg, exc_info=True)
 
 
     def parse_snmpv3_trap(self, trap_data, host):
@@ -352,9 +343,12 @@ class SNMPListener(ListenerServerModule, ServerModule):
                 auth_mod.authenticateIncomingMsg(auth_key, digest, trap_data)
             except:
                 # Authentication failed.
-                reason = 'Invalid auth password for user %s' % user_name
+                err_msg = 'SNMPListener: Authentication failed for SNMPv3.\n'
+                err_msg += 'Username: %s\n' % user_name
+                err_msg += 'Source Host: %s\n' % str(host)
+                logging.error(err_msg, exc_info=True)
                 raise SNMPv3AuthenticationFailed(reason)
-                # TODO: log this. maybe generate a notification.
+                # TODO Maybe generate a notification.
 
         # Decrypt the message
         pdu = message.getComponentByPosition(3)
@@ -589,9 +583,9 @@ class SNMPDatagramProtocol(DatagramProtocol):
         try:
             self.snmp_listener.receive_message(host, port, data)
         except Exception, e:
-            traceback.print_exc()
-            # TODO log this
-
+            err_msg = 'SNMPListener: Error receiving message from %s:%d'
+            logging.warning(err_msg, host, port, exc_info=True)
+ 
 
 
 class SNMPv1Notification(Notification):

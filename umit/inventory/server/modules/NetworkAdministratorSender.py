@@ -21,6 +21,7 @@ from umit.inventory.server.Module import ServerModule
 
 import json
 import httplib
+import logging
 import urllib
 import time
 import base64
@@ -134,7 +135,7 @@ class NotificationQueueDispatcher(Thread):
         if len(self.queue) is 0:
             return
 
-        conn = httplib.HTTPConnection(self.host)
+        conn = httplib.HTTPSConnection(self.host)
 
         sent_message = json.dumps(self.queue)
         auth_string = get_auth_string(self.username, self.password)
@@ -143,6 +144,13 @@ class NotificationQueueDispatcher(Thread):
         params = urllib.urlencode(sent_dict)
         conn.request("POST", "/api/event/report/", params, headers)
         response = conn.getresponse()
+
+        debug_msg = 'NetworkAdministratorSender: HTTP Response\n'
+        debug_msg += 'Status Code: %s' % str(response.status)
+        debug_msg += 'Reason: %s' % str(response.reason)
+        debug_msg += 'Response Message:\n%s' % str(response.msg)
+        debug_msg += 'Response Body:\n%s' % str(response.read())
+        logging.debug(debug_msg)
 
         conn.close()
         

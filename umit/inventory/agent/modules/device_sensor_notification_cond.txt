@@ -4,7 +4,7 @@
         "tracking_variable_param" : {},
         "mode" : "average",
         "reducing_time" : 5,
-        "threshold" : 0.8,
+        "threshold" : 0.5,
         "threshold_comp" : "gt",
         "notif_type" : "WARNING",
         "notif_short_msg": "CPU% over given threshold",

@@ -59,6 +59,14 @@ class MonitoringModule(Thread):
         raise MonitoringModule.NotImplemented('get_name')
 
 
+    def get_prefix(self):
+        """
+        Must be implemented by the Monitoring Module.
+        Returns the prefix that should be used for the module specific fields.
+        """
+        raise MonitoringModule.NotImplemented('get_prefix')
+
+
     def send_message(self, message, short_message, msg_type, fields, is_report):
         """
         Used by the Monitoring Module which inherents this class
@@ -69,8 +77,14 @@ class MonitoringModule(Thread):
         fields: A dictionary with the module specific fields.
         is_report: True if the notification is a report.
         """
+        # Prefix the fields
+        prefixed_fields = dict()
+        for field_key in fields.keys():
+            prefixed_field_key = self.get_prefix() + '_' + field_key
+            prefixed_fields[prefixed_field_key] = fields[field_key]
+
         notification = AgentNotificationParser.encode(message, short_message,\
-                msg_type, fields, is_report, self.get_name())
+                msg_type, prefixed_fields, is_report, self.get_name())
         self.agent_main_loop.add_message(notification)
 
 

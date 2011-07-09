@@ -54,6 +54,10 @@ class TestModule(MonitoringModule):
         return 'TestModule'
 
 
+    def get_prefix(self):
+        return 'test_module'
+
+
     def _generate_random_message(self):
         # Waits a random time and generates a random message.
         temp = random() * (self.max_sleep_time - self.min_sleep_time)

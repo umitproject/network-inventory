@@ -25,6 +25,7 @@ from email.mime.text import MIMEText
 import time
 import traceback
 import string
+import logging
 
 
 class EmailSender(ServerModule, SubscriberServerModule):
@@ -56,7 +57,7 @@ class EmailSender(ServerModule, SubscriberServerModule):
         self.enable_ssl = bool(self.options[EmailSender.enable_ssl])
         self.enable_tsl = bool(self.options[EmailSender.enable_tsl])
 
-        
+
     def get_name(self):
         return 'EmailSender'
 
@@ -69,7 +70,7 @@ class EmailSender(ServerModule, SubscriberServerModule):
         self.options[EmailSender.to_list] = 'dena_dr89@yahoo.com,dragos.dena@gmail.com'
         self.options[EmailSender.password] = 'guestpassword'
         self.options[EmailSender.enable_html] = True
-        self.options[EmailSender.send_for] = 'CRITICAL,INFO'
+        self.options[EmailSender.send_for] = 'CRITICAL'
         self.options[EmailSender.enable_ssl] = False
         self.options[EmailSender.enable_tsl] = True
 
@@ -126,9 +127,9 @@ class EmailSender(ServerModule, SubscriberServerModule):
             server.login(self.login, self.password)
             server.sendmail(self.from_addr, self.to_list , msg)
             server.quit()
+            logging.info('EmailSender: Sent email to: %s'. str(self.to_list))
         except:
-            traceback.print_exc()
-            # TODO log this
+            logging.error('EmailSender: Failed sending email', exc_info=True)
 
 
     def subscribe(self):
