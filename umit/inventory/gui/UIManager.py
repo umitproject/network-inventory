@@ -33,6 +33,7 @@ glade_files_path = os.path.join('umit', 'inventory', 'gui', 'glade_files')
 ni_main_window_file = os.path.join(glade_files_path, 'ni_main.glade')
 ni_auth_window_file = os.path.join(glade_files_path, 'ni_auth_window.glade')
 ni_events_view_file = os.path.join(glade_files_path, 'ni_events_view.glade')
+ni_event_window_file = os.path.join(glade_files_path, 'ni_event_window.glade')
 
 
 class NIUIManager(gobject.GObject):
@@ -56,6 +57,14 @@ class NIUIManager(gobject.GObject):
         "unsubscribe": (gobject.SIGNAL_RUN_FIRST,
                         gobject.TYPE_NONE,
                         ()),
+        # Emitted when the we are asking for a module specific widget to
+        # display event details
+        # Parameters: notification object, gtk.Container to add the widget,
+        #             gtk.Label to put the module name
+        "show-event-details": (gobject.SIGNAL_RUN_FIRST,
+                               gobject.TYPE_NONE,
+                               (gobject.TYPE_PYOBJECT, gobject.TYPE_OBJECT,\
+                                gobject.TYPE_OBJECT)),
         }
 
 
@@ -70,9 +79,11 @@ class NIUIManager(gobject.GObject):
         self.main_window = None
         self.auth_window = None
         self.events_view = None
+        self.event_window = None
         self.init_main_window()
         self.init_auth_window()
         self.init_events_view()
+        self.init_event_window()
 
 
     def init_main_window(self):
@@ -216,6 +227,19 @@ class NIUIManager(gobject.GObject):
         self.events_view.unparent()
         self.ni_notebook.insert_page(self.events_view,\
                                      gtk.Label('Network Events'), 0)
+
+
+    def init_event_window(self):
+        self.event_window_manager =\
+                EventWindowManager(ni_event_window_file, self)
+
+
+    def event_show_request(self, notification):
+        if self.event_window_manager is not None:
+            self.event_window_manager.show_event(notification, self.main_window)
+            cont = self.event_window_manager.get_module_container()
+            label = self.event_window_manager.get_module_label()
+            self.emit('show-event-details', notification, cont, label)
 
 
     def set_login_state(self):
@@ -519,6 +543,15 @@ class EventsViewManager(gobject.GObject):
         self.critical_cb.connect('toggled', self.on_not_all_cb_toggled)
         self.security_cb.connect('toggled', self.on_not_all_cb_toggled)
         self.unknown_cb.connect('toggled', self.on_not_all_cb_toggled)
+        self.events_tree_view.connect('row-activated',\
+                self.on_events_tree_view_row_activated, self)
+
+
+    def on_events_tree_view_row_activated(self, tree_view, path, col, data):
+        model = tree_view.get_model()
+        iter = model.get_iter(path)
+        notification = model.get_value(iter, self.TREE_MODEL_COL_NOTIF_OBJ)
+        self.ui_manager.event_show_request(notification)
 
 
     def checkbuttons_active(self):
@@ -585,3 +618,158 @@ class EventsViewManager(gobject.GObject):
             self.all_cb.set_active(False)
         elif self.checkbuttons_active():
             self.all_cb.set_active(True)
+
+
+
+class EventWindowManager:
+
+    DETAILS_TREE_COL_KEY = 0
+    DETAILS_TREE_COL_VALUE = 1
+
+
+    def __init__(self, glade_file, ui_manager):
+        self.ui_manager = ui_manager
+        self.glade_file = glade_file
+
+    def _get_objects(self):
+        builder = gtk.Builder()
+        builder.add_from_file(self.glade_file)
+
+        # Get the objects
+        self.event_window = builder.get_object('event_window')
+        self.host_label = builder.get_object('host_label')
+        self.type_label = builder.get_object('type_label')
+        self.time_label = builder.get_object('time_label')
+        self.ip_label = builder.get_object('ip_label')
+        self.details_expander = builder.get_object('details_expander')
+        self.module_expander = builder.get_object('module_expander')
+        self.description_text_view = builder.get_object('description_text_view')
+        self.details_tree_view = builder.get_object('details_tree_view')
+        self.module_specific_label = builder.get_object('module_specific_label')
+        self.module_specific_zone = builder.get_object('module_specific_zone')
+        self.module_specific_container =\
+            builder.get_object('module_specific_container')
+
+
+    def show_event(self, event, parent_window):
+        """
+        Called when we should show the Event window for the given event.
+        event: The Notification object for which we want to show the window.
+        parent_window: The parent window for the event window.
+        """
+        # Load the window
+        try:
+            self._get_objects()
+        except:
+            traceback.print_exc()
+            return
+
+        # Get the needed details
+        try:
+            hostname = event['hostname']
+            ipv4_addr = event['source_host_ipv4']
+            ipv6_addr = event['source_host_ipv6']
+            event_type = event['event_type']
+            timestamp = float(event['timestamp'])
+            description = event['description']
+        except:
+            traceback.print_exc()
+            return
+
+        # Set the values for the labels
+        self.host_label.set_markup(self.format_host_label(hostname))
+        self.time_label.set_markup(self.format_time_label(timestamp))
+        self.ip_label.set_markup(self.format_ip_label(ipv4_addr, ipv6_addr))
+        self.type_label.set_markup(self.format_type_label(event_type))
+
+        # Set the value for the text view
+        buffer = self.description_text_view.get_buffer()
+        buffer.set_text(description)
+
+        # Hide the module-specific zone until we get a request to show
+        # a widget in it
+        self.module_specific_zone.hide()
+
+        # Initialize the fields TreeView
+        self._init_details_tree_view(event)
+        
+        # Show the window
+        self.event_window.set_transient_for(parent_window)
+        self.event_window.set_destroy_with_parent(True)
+        self.event_window.show()
+
+
+    def get_module_container(self):
+        return self.module_specific_container
+
+
+    def get_module_label(self):
+        return self.module_specific_label
+        
+
+    def _init_details_tree_view(self, event):
+        # Init model
+        details_model = gtk.ListStore(gobject.TYPE_STRING, gobject.TYPE_STRING)
+        for event_key in event.keys():
+            field_value = str(event[event_key])
+            field_key = '<b>%s</b>' % event_key
+            iter = details_model.append()
+            details_model.set(iter,\
+                              self.DETAILS_TREE_COL_KEY, copy(field_key),\
+                              self.DETAILS_TREE_COL_VALUE, copy(field_value))
+        self.details_tree_view.set_model(details_model)
+    
+        # 1. Field Name Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Field Name', cell,\
+                                 markup=self.DETAILS_TREE_COL_KEY)
+        col.set_min_width(200)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        self.details_tree_view.append_column(col)
+
+        # 2. Type Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Field Name', cell,\
+                                 markup=self.DETAILS_TREE_COL_VALUE)
+        col.set_min_width(200)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        self.details_tree_view.append_column(col)
+
+
+    @staticmethod
+    def format_host_label(hostname):
+        if hostname in ('', None):
+            hostname = '[Undefined]'
+        return '<b>Source Host</b>: %s' % hostname
+
+
+    @staticmethod
+    def format_time_label(timestamp):
+        time_str = time.ctime(timestamp)
+        return '<b>Time</b>: %s' % time_str
+
+
+    @staticmethod
+    def format_ip_label(ipv4_addr, ipv6_addr):
+        if ipv4_addr not in ('', None):
+            ip_addr = ipv4_addr
+        elif ipv6_addr not in ('', None):
+            ip_addr = ipv6_addr
+        else:
+            ip_addr = '[Undefined]'
+        return '<b>IP Address</b>: %s' % ip_addr
+
+
+    @staticmethod
+    def format_type_label(event_type):
+        if event_type == NotificationTypes.critical:
+            color = '#B50D0D'
+        elif event_type == NotificationTypes.warning:
+            color = '#DB5A5A'
+        else:
+            color = 'black'
+
+        return '<b>Type: <span foreground=\'%s\'>%s</span></b>' %\
+                (color, event_type)

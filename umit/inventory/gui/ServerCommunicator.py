@@ -122,7 +122,6 @@ class NIServerCommunicator(Thread):
 
     def handle_message(self, msg):
         """ Called when a request is received from the Server """
-        print msg
         try:
             msg = json.loads(msg)
         except:

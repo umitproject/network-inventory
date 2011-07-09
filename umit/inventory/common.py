@@ -29,7 +29,7 @@ class NotificationTypes:
     warning = "WARNING"
     critical = "CRITICAL"
     security = "SECURITY"
-    unknown = 'UNKNOWN'
+    unknown = "UNKNOWN"
 
 
 
