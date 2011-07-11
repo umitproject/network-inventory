@@ -32,7 +32,6 @@ from pyasn1.codec.ber import decoder
 import pyasn1.type.univ
 from pysnmp.proto.secmod.rfc3414 import auth, priv, localkey
 
-import traceback
 from copy import copy
 import time
 import logging

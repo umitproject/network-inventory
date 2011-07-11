@@ -1,0 +1,33 @@
+1. Dependencies
+
+Notifications Server dependencies (Windows and Linux):
+* a MongoDB instance running
+* PySNMP 4.1.16a (http://sourceforge.net/projects/pysnmp/files/pysnmp-devel/4.1.16a/)
+* PyOpenSSL (https://launchpad.net/pyopenssl)
+
+Agent dependencies (Windows only):
+* PyWin32 (http://sourceforge.net/projects/pywin32/files/pywin32/Build216/)
+* WMI (http://timgolden.me.uk/python/wmi/index.html)
+
+GUI:
+* PyGTK
+
+
+2. Running
+
+The Python Interpreter should be ran from the network inventory root folder.
+For example, to run the UmitAgent:
+    python bin/agent.py
+
+Note: On Linux, you can run './run.sh agent', './run.sh server', './run.sh gui'
+to run the three applications.
+
+
+3. Configuring
+
+Note: The path for the configuration files is temporary.
+
+Agent:  umit/inventory/agent/umit_agent.conf
+Server: umit/inventory/server/umit_server.conf
+GUI:    umit/inventory/gui/umit_ni_gui.conf
+

@@ -23,7 +23,6 @@ from umit.inventory.server.Notification import NotificationFields
 import smtplib
 from email.mime.text import MIMEText
 import time
-import traceback
 import string
 import logging
 
