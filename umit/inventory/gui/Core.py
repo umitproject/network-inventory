@@ -22,6 +22,7 @@ from umit.inventory.gui.ServerCommunicator import NIServerCommunicator
 from umit.inventory.gui.UIManager import NIUIManager
 from umit.inventory.gui.ServerCommunicator import SubscribeRequest
 from umit.inventory.gui.ServerCommunicator import UnsubscribeRequest
+from umit.inventory.gui.Configs import NIConfig
 
 import gtk
 from gobject import GObject
@@ -93,6 +94,14 @@ class NICore(GObject):
         gobject.idle_add(self.server_communicator.send_request,\
             SubscribeRequest(self.username, self.password))
 
+        self.conf.set_general_option(NIConfig.ni_server_username, self.username)
+        self.conf.set_general_option(NIConfig.ni_server_host, self.host)
+        self.conf.set_general_option(NIConfig.ni_server_port, self.port)
+        self.conf.set_general_option(NIConfig.ni_server_enable_ssl,\
+                                     self.ssl_enabled)
+        self.conf.save_settings()
+
+
     def set_connection_failed(self):
         msg = 'Fatal Error: Connection closed by the Notifications Server'
         second_title = 'Shutting Down'
@@ -115,6 +124,9 @@ class NICore(GObject):
     def on_login(self, emitting_obj, uname, password, host, port, ssl_enabled):
         self.username = uname
         self.password = password
+        self.host = host
+        self.port = port
+        self.ssl_enabled = ssl_enabled
         self.server_communicator.connect(uname, password, host,\
                                          port, ssl_enabled)
 
