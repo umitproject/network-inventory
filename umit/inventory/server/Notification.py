@@ -28,8 +28,8 @@ class Notification:
 
     Standard fields:
 
-    * source_host_ipv4: Source host IPv4 (or '' if not defined)
-    * source_host_ipv6: Source host IPv6 (or '' if not defined)
+    * source_host_ipv4: Source host IPv4 (or '' if not defined).
+    * source_host_ipv6: Source host IPv6 (or '' if not defined).
     * hostname: Source host name (or '' if not defined)
     * timestamp: The number of seconds since the epoch when the notification
       was generated.

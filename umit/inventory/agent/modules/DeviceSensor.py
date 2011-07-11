@@ -1138,7 +1138,6 @@ class CpuPercentGenerator(MeasurementGenerator):
         self.cpu_percent.start()
 
     def measure(self):
-        print self.latest_value
         self.latest_value = self.cpu_percent.get_value()
 
 

@@ -188,7 +188,7 @@ class User:
                     UserPermissions.deserialize(db_object[User.permissions]),\
                     md5_password=db_object[User.md5_pass])
 
-        
+
 
 class UserPermissions:
     """

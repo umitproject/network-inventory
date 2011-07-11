@@ -17,6 +17,9 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import logging
+import socket
+import time
+from threading import Lock
 
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.server.Module import ListenerServerModule
@@ -25,6 +28,8 @@ from umit.inventory.server.Database import Database
 from umit.inventory.server.ServerInterface import ServerInterface
 from umit.inventory.server.UserSystem import UserSystem
 from umit.inventory.common import CorruptInventoryModule
+from umit.inventory.server.Notification import Notification
+from umit.inventory.server.Notification import NotificationFields
 import umit.inventory.common
 
 from twisted.internet import reactor
@@ -150,6 +155,8 @@ class ServerShell:
         self._core = core
         self.database = self._core.database
         self.server_interface = None
+        self.raise_notification_lock = Lock()
+        self._full_subscribers = []
         self._subscriptions = dict()
         logging.info('Initialized ServerShell')
 
@@ -198,6 +205,7 @@ class ServerShell:
                     self._subscriptions[module_name] = []
 
                 self._subscriptions[module_name].append(subscriber)
+            self._full_subscribers.append(subscriber)
             logging.info('Module %s subscribed to all listener modules',\
                          subscriber.get_name())
             return
@@ -233,6 +241,33 @@ class ServerShell:
                 raise InvalidSubscriber(module)
 
             module.receive_notification(notification)
+
+
+    def raise_notification(self, description, short_description, notif_type,\
+                           is_report=False, ipv4_addr='', ipv6_addr='',\
+                           hostname=''):
+        """
+        Used to raise a internal server notification.
+        """
+        self.raise_notification_lock.acquire()
+        # Construct the notification
+        notif_fields = dict()
+        notif_fields[NotificationFields.description] = unicode(description)
+        notif_fields[NotificationFields.short_description] = unicode(short_description)
+        notif_fields[NotificationFields.notification_type] = str(notif_type)
+        notif_fields[NotificationFields.is_report] = is_report
+        notif_fields[NotificationFields.hostname] = str(hostname)
+        notif_fields[NotificationFields.timestamp] = time.time()
+        notif_fields[NotificationFields.protocol] = 'UmitAgent'
+        notif_fields[NotificationFields.source_host_ipv4] = str(ipv4_addr)
+        notif_fields[NotificationFields.source_host_ipv6] = str(ipv6_addr)
+
+        notification = Notification(notif_fields)
+        self.database.store_notification(notification)
+        self.server_interface.forward_notification(notification)
+        for subscriber in self._full_subscribers:
+            subscriber.receive_notification(notification)
+        self.raise_notification_lock.release()
 
 
 class InvalidSubscriber(Exception):

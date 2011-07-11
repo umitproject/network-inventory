@@ -29,6 +29,7 @@ class AgentConfig(InventoryConfig):
     default_polling_time = 2.0
     default_max_notification_queue_size = 1000
     default_auth_enabled = False
+    default_command_port = '40000'
     default_username = 'guest'
     default_password = 'guest'
 
@@ -41,6 +42,7 @@ class AgentConfig(InventoryConfig):
     polling_time = 'polling_time_interval'
     max_notification_queue_size = 'max_notification_queue_size'
     auth_enabled = 'authentication_enabled'
+    command_port = 'command_port'
     username = 'username'
     password = 'password'
 
@@ -63,6 +65,8 @@ class AgentConfig(InventoryConfig):
                  str(AgentConfig.default_polling_time))
         self.set(InventoryConfig.general_section, AgentConfig.auth_enabled,\
                  str(AgentConfig.default_auth_enabled))
+        self.set(InventoryConfig.general_section, AgentConfig.command_port,\
+                 str(AgentConfig.default_command_port))
         self.set(InventoryConfig.general_section, AgentConfig.username,\
                  str(AgentConfig.default_username))
         self.set(InventoryConfig.general_section, AgentConfig.password,\

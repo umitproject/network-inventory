@@ -24,6 +24,10 @@ from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 from umit.inventory.common import AgentFields
 from umit.inventory.common import message_delimiter
+from umit.inventory.common import AgentMessageTypes
+from umit.inventory.common import NotificationTypes
+from umit.inventory.common import keep_alive_timeout
+from umit.inventory.server.Host import Host
 
 from twisted.internet import reactor
 from twisted.internet.protocol import DatagramProtocol
@@ -35,11 +39,14 @@ from twisted.internet.address import IPv4Address
 
 import socket
 import logging
+import time
 import json
 import tempfile
 from copy import copy
 import os
 import hashlib
+from threading import Thread
+from threading import Lock
 
 
 class AgentListener(ListenerServerModule, ServerModule):
@@ -84,8 +91,13 @@ class AgentListener(ListenerServerModule, ServerModule):
             self.ssl_enabled = False
         logging.info('AgentListener: Loaded SSL support')
 
+        self.agent_tracker = None
         # The users used for authentication if enabled
         self.users = {}
+
+        # The command ports of the hosts in the network. If the value is
+        # None, then the host is down
+        self.hosts_command_port = {}
 
 
     def _generate_ssl_files(self):
@@ -134,6 +146,11 @@ class AgentListener(ListenerServerModule, ServerModule):
                 continue
             self.users[username] = md5_pass
 
+        # Get the list of hosts from the database
+        hosts_list = self.shell.database.get_hosts()
+        self.agent_tracker = AgentTracker(self.shell, hosts_list)
+        self.agent_tracker.start()
+
         # TODO: delete this after testing is done:
         if 'guest' not in self.users.keys():
             guest_pass = hashlib.md5('guest').hexdigest()
@@ -166,6 +183,7 @@ class AgentListener(ListenerServerModule, ServerModule):
         # Must be careful, as it may be invalid and not contain all the fields.
         fields = dict()
         try:
+
             # Determine if the IP Address is IPv4 or IPv6
             host_ip = str(host)
             is_ipv4 = True
@@ -173,6 +191,16 @@ class AgentListener(ListenerServerModule, ServerModule):
                 socket.inet_aton(host_ip)
             except:
                 is_ipv4 = False
+
+            # Check if it's a KEEP_ALIVE or GOING_DOWN message
+            message_type = str(temp[AgentFields.message_type])
+            if message_type == AgentMessageTypes.keep_alive or\
+               message_type == AgentMessageTypes.going_down:
+                if is_ipv4:
+                    self.agent_tracker.add_message((temp, host, ''))
+                else:
+                    self.agent_tracker.add_message((temp, '', host))
+                return
 
             # Initialisation of the IP address based on the previous logic
             fields[NotificationFields.source_host_ipv4] = ''
@@ -361,3 +389,153 @@ class AgentNotificationFields(NotificationFields):
     def get_types():
         return AgentNotificationFields.types
 
+
+
+class AgentTracker(Thread):
+
+    def __init__(self, shell, hosts):
+        Thread.__init__(self)
+        self.daemon = True
+
+        self.shell = shell
+
+        # hostname : AgentInformation
+        self.agents_info = dict()
+        for host in hosts:
+            self.agents_info[host.hostname] = AgentInformation(host)
+
+        self.received_messages = []
+        self.received_messages_lock = Lock()
+
+        self.should_shutdown = False
+        self.should_shutdown_lock = Lock()
+
+
+    def add_message(self, message):
+        """ message must be a tuple (agent message, ipv4_addr, ipv6_addr) """
+        self.received_messages_lock.acquire()
+        self.received_messages.append(message)
+        self.received_messages_lock.release()
+
+
+    def _handle_messages(self):
+        self.received_messages_lock.acquire()
+        current_messages = self.received_messages
+        self.received_messages = list()
+        self.received_messages_lock.release()
+
+        for message in current_messages:
+            self._handle_message(message[0], message[1], message[2])
+
+
+    def _handle_message(self, message, ipv4_addr='', ipv6_addr=''):
+        logging.debug('AgentTracker: Handling notification:\n%s',\
+                      str(message))
+        try:
+            message_type = message[AgentFields.message_type]
+            hostname = message[AgentFields.hostname]
+            timestamp = float(message[AgentFields.timestamp])
+        except:
+            logging.debug('AgentTracker: Failed handling notification',\
+                          exc_info=True)
+            return
+
+        if message_type == AgentMessageTypes.keep_alive:
+            command_port = int(message[AgentFields.command_port])
+            if hostname not in self.agents_info.keys():
+                host = Host(hostname, ipv4_addr, ipv6_addr)
+                self.agents_info[hostname] = AgentInformation(host,\
+                        command_port, time.time())
+                self.shell.database.add_host(host)
+                self._raise_recovery_notification(hostname, timestamp,\
+                                                  ipv4_addr, ipv6_addr)
+            else:
+                self.agents_info[hostname].update_keep_alive()
+                if self.agents_info[hostname].command_port == -1:
+                    self.agents_info[hostname].command_port = command_port
+                    self._raise_recovery_notification(hostname, timestamp,\
+                                                      ipv4_addr, ipv6_addr)
+
+        if message_type == AgentMessageTypes.going_down:
+            description = 'Received GOING_DOWN message from host %s\n' % hostname
+            description += 'The Umit Agent Daemon quit gracefully at %s.\n'\
+                    % time.ctime(timestamp)
+            short_description = 'Umit Agent going down'
+            notif_type = NotificationTypes.warning
+            self.shell.raise_notification(description, short_description,\
+                    notif_type, False, ipv4_addr, ipv6_addr, hostname)
+
+
+    def _raise_recovery_notification(self, hostname, timestamp,\
+                                     ipv4_addr, ipv6_addr):
+        description = 'Received first KEEP_ALIVE message from host %s\n'\
+                        % hostname
+        description += 'The Umit Agent Daemon on this machine is UP.'
+        short_description = 'Umit Agent is UP.'
+        notif_type = NotificationTypes.recovery
+        self.shell.raise_notification(description, short_description,\
+                    notif_type, False, ipv4_addr, ipv6_addr, hostname)
+        
+
+    def shutdown(self):
+        self.should_shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.should_shutdown_lock.release()
+
+
+    def _test_agents_information(self):
+        for agent_info in self.agents_info.values():
+            # The host is already marked as down
+            if agent_info.command_port == -1:
+                continue
+
+            # The timeout expired
+            if agent_info.last_keep_alive + 3 * keep_alive_timeout < time.time():
+                description = 'Haven\'t received a KEEP-ALIVE message from '
+                description += 'the Umit Agent on %s in %.1f seconds\n' %\
+                        (agent_info.host.hostname, 3 * keep_alive_timeout)
+                description += 'Considering the Umit Agent daemon went down.\n'
+                short_description = 'Umit Agent going down'
+                notif_type = NotificationTypes.critical
+                self.shell.raise_notification(description, short_description,\
+                        notif_type, False, agent_info.host.ipv4_addr,\
+                        agent_info.host.ipv6_addr, agent_info.host.hostname)
+                agent_info.command_port = -1
+                agent_info.last_keep_alive = -1
+
+
+    def run(self):
+        while True:
+            self.should_shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.should_shutdown_lock.release()
+                break
+            self.should_shutdown_lock.release()
+
+            self._handle_messages()
+
+            # Check if any host went down without sending a KEEP-ALIVE
+            # message
+            self._test_agents_information()
+
+            time.sleep(2.0)
+
+
+
+class AgentInformation:
+
+    def __init__(self, host, command_port=-1, last_keep_alive=-1):
+        """
+        self.host: A Host object where the Agent is installed.
+        self.command_port: The port on which the agent is listening for
+        commands.
+        self.last_keep_alive: The last time when a keep alive was received
+        from this agent.
+        """
+        self.host = host
+        self.command_port = command_port
+        self.last_keep_alive = last_keep_alive
+
+
+    def update_keep_alive(self):
+        self.last_keep_alive = time.time()

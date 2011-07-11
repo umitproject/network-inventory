@@ -19,11 +19,13 @@
 import pymongo
 
 from umit.inventory.server.Notification import Notification
-from umit.inventory.Configuration import InventoryConfig
+from umit.inventory.server.Notification import NotificationFields
+from umit.inventory.server.Host import Host
 
 import logging
 import json
 from copy import copy
+from threading import Lock
 
 
 class Database:
@@ -55,7 +57,8 @@ class Database:
     host = 'host'
     port = 'port'
     database_name = 'database_name'
-    notifications_collection = 'notification_collection'
+    notifications_collection = 'notifications_collection'
+    hosts_collection = 'hosts_collection'
     username = 'username'
     password = 'password'
     store_notifications = 'store_notifications'
@@ -74,6 +77,8 @@ class Database:
         self.database_name = str(self.options[Database.database_name])
         self.notifications_collection_name =\
                 str(self.options[Database.notifications_collection])
+        self.hosts_collection_name =\
+                str(self.options[Database.hosts_collection])
         self.username = str(self.options[Database.username])
         self.password = str(self.options[Database.password])
         self.store_notifications =\
@@ -104,6 +109,9 @@ class Database:
         self.notifications_collection =\
                 self.database[self.notifications_collection_name]
 
+        # The collection where the hosts will be stored
+        self.hosts_collection = self.database[self.hosts_collection_name]
+        self.hosts_collection_lock = Lock()
 
 
     def store_notification(self, notification):
@@ -127,6 +135,49 @@ class Database:
         # Saving a copy since mongodb will add the ObjectID to the dictionary
         # which won't keep it JSON seriazable
         self.notifications_collection.insert(copy(notification.fields))
+
+
+    # Host querying method
+
+    def add_host(self, host):
+        """
+        Adds the host to the database.
+        host: A Host object.
+        """
+        self.hosts_collection_lock.acquire()
+
+        if self.find(self.hosts_collection_name,\
+                     {Host.hostname : host.hostname}).count() == 1:
+            self.update(self.hosts_collection_name,\
+                        {Host.hostname : host.hostname},\
+                        {Host.ipv4_addr : host.ipv4_addr,\
+                         Host.ipv6_addr : host.ipv6_addr})
+        else:
+            self.insert(self.hosts_collection_name, host.to_db_object())
+        self.hosts_collection_lock.release()
+
+
+    def get_hosts(self):
+        """ Gets a list with all the hosts in the database """
+        self.hosts_collection_lock.acquire()
+        host_list = self.find(self.hosts_collection_name)
+        self.hosts_collection_lock.release()
+
+        hosts = list()
+        for host_db_obj in host_list:
+            hosts.append(Host.from_db_object(host_db_obj))
+        return hosts
+
+
+    def get_host(self, hostname):
+        """ Get the host object with the given hostname """
+        self.hosts_collection_lock.acquire()
+        host_list = self.find(self.hosts_collection_name,\
+                              {Host.hostname : hostname})
+        self.hosts_collection_lock.release()
+        if type(host_list) is list:
+            return Host.from_db_object(host_list[0])
+        return None
 
 
     # Mongo wrappers
@@ -208,6 +259,7 @@ class Database:
         self.options[Database.port] = ''
         self.options[Database.database_name] = 'umit_inventory'
         self.options[Database.notifications_collection] = 'notifications'
+        self.options[Database.hosts_collection] = 'hosts'
         self.options[Database.username] = ''
         self.options[Database.password] = ''
         self.options[Database.store_notifications] = 'True'

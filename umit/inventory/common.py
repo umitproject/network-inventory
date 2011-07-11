@@ -21,6 +21,11 @@ import logging
 # The message delimiter used for TCP communication
 message_delimiter = '\x00\x01\x02\x03'
 
+# The time interval between consecutive KEEP_ALIVE Agent messages.
+# An Agent is considered down if the Notifications Server doesn't receive
+# a KEEP_ALIVE message in 3 times. It's expressed in number of seconds.
+keep_alive_timeout = 5.0
+
 
 class NotificationTypes:
 
@@ -32,19 +37,34 @@ class NotificationTypes:
     unknown = "UNKNOWN"
 
 
+class AgentMessageTypes:
+    """
+    The possible values for the Agent message_type field. This consists
+    of all the values defined in the class NotificationTypes plus the
+    following values.
+    """
+    keep_alive = "KEEP_ALIVE"
+    going_down = "GOING_DOWN"
+
 
 class AgentFields:
 
+    # Present in all message types
     hostname = 'hostname'
     timestamp = 'timestamp'
+    message_type = 'type'
+
+    # Only present if message_type is not 'KEEP_ALIVE' or 'GOING_DOWN'
     message = 'message'
     short_message = 'short_message'
     is_report = 'is_report'
-    message_type = 'type'
     monitoring_module = 'monitoring_module'
     module_fields = 'module_fields'
 
-    # Optional: Only if authentication is enabled.
+    # Only present if the message_type is 'KEEP_ALIVE'
+    command_port = 'command_port'
+
+    # Optional: Only if authentication is enabled (for any message type)
     username = 'username'
     password = 'password'
 

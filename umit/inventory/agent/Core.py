@@ -29,6 +29,7 @@ from umit.inventory.common import CorruptInventoryModule
 from umit.inventory.common import AgentFields
 from umit.inventory import common
 from umit.inventory.common import message_delimiter
+from umit.inventory.common import keep_alive_timeout
 
 
 class AgentMainLoop:
@@ -52,6 +53,7 @@ class AgentMainLoop:
         self.message_parser = message_parser
         self.modules = []
         self.conf = configurations
+        self.keep_alive_timer = time.time()
 
         # If we should shut-down
         self.shutdown = False
@@ -132,12 +134,23 @@ class AgentMainLoop:
             for module in self.modules:
                 module.start()
 
+            # Send the keep-alive message
+            self.message_parser.send_keep_alive()
+
             # The actual main loop
             logging.info('Starting the Agent Main Loop')
             while True:
                 if self.shutdown:
+                    # Send the going-down message
+                    self.message_parser.send_going_down()
                     logging.info('Shutting down ...')
                     break
+
+                # Test if we should send the keep-alive message
+                if self.keep_alive_timer + keep_alive_timeout < time.time():
+                    self.message_parser.send_keep_alive()
+                    self.keep_alive_timer = time.time()
+
                 self.added_message_queue_lock.acquire()
                 if self.received_messages:
                     self.parsing_message_queue = self.added_message_queue
@@ -169,6 +182,8 @@ class AgentNotificationParser:
         It also offers the option to encrypt the messages if specified trough
         SSL.
         """
+        self.command_port =\
+            int(configs.get_general_option(AgentConfig.command_port))
         self.server_addr = configs.get_general_option(AgentConfig.server_addr)
         self.server_port = configs.get_general_option(AgentConfig.server_port)
         self.server_port = int(self.server_port)
@@ -186,6 +201,35 @@ class AgentNotificationParser:
             configs.get_general_option(AgentConfig.username)
         AgentNotificationParser.password =\
             configs.get_general_option(AgentConfig.password)
+
+
+    def send_keep_alive(self):
+        message_obj = dict()
+        message_obj[AgentFields.command_port] = self.command_port
+        message_obj[AgentFields.message_type] = 'KEEP_ALIVE'
+        message_obj[AgentFields.hostname] = socket.gethostname()
+        message_obj[AgentFields.timestamp] = time.time()
+
+        # Optional authentication fields
+        if AgentNotificationParser.auth_enabled:
+            message_obj[AgentFields.username] = self.username
+            message_obj[AgentFields.password] = self.password
+
+        self.parse(json.dumps(message_obj))
+
+
+    def send_going_down(self):
+        message_obj = dict()
+        message_obj[AgentFields.message_type] = 'GOING_DOWN'
+        message_obj[AgentFields.hostname] = socket.gethostname()
+        message_obj[AgentFields.timestamp] = time.time()
+
+        # Optional authentication fields
+        if AgentNotificationParser.auth_enabled:
+            message_obj[AgentFields.username] = AgentNotificationParser.username
+            message_obj[AgentFields.password] = AgentNotificationParser.password
+
+        self.parse(json.dumps(message_obj))
 
 
     def parse(self, message, emptying_queue=False):
