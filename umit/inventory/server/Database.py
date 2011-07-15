@@ -114,6 +114,14 @@ class Database:
         self.hosts_collection_lock = Lock()
 
 
+    def get_notifications_collection_name(self):
+        return self.notifications_collection_name
+
+
+    def get_hosts_collection_name(self):
+        return self.hosts_collection_name
+
+
     def store_notification(self, notification):
         """ Called when a notification was received """
         # If we shouldn't store the notifications

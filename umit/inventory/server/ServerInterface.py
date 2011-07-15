@@ -20,6 +20,7 @@ from OpenSSL import crypto
 
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
+from umit.inventory.server.Database import Database
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.common import message_delimiter
 from umit.inventory.server.Module import ListenerServerModule
@@ -87,6 +88,7 @@ class ServerInterface:
             'SUBSCRIBE' : self.evaluate_subscribe_request,\
             'UNSUBSCRIBE' : self.evaluate_unsubscribe_request,\
             'GET_MODULES' : self.evaluate_get_modules_request,\
+            'GET_HOSTS' : self.evaluate_get_hosts_request,\
             'GET_CONFIGS' : self.evaluate_get_configs_request,\
             'SET_CONFIGS' : self.evaluate_set_configs_request,\
             'RESTART' : self.evaluate_restart_request,\
@@ -105,6 +107,9 @@ class ServerInterface:
         # Users which are subscribed to notifications.
         # username : SubscribedUserContext
         self.subscribed_users = {}
+
+        # Contexes used for searching
+        self.search_contexes = {}
 
 
     @staticmethod
@@ -283,7 +288,30 @@ class ServerInterface:
         get_modules_body[GetModulesResponseBody.modules] =\
                 self.shell.get_modules_names_list()
         response[ResponseFields.body] = get_modules_body
-        connection.send_message(json.dumps(response))
+        connection.send_message(json.dumps(response), True)
+
+
+    def evaluate_get_hosts_request(self, request, connection):
+        req_id = request.get_request_id()
+
+        # Get the hosts from the database
+        hosts = self.shell.database.get_hosts()
+        hostnames = []
+        ipv4_addresses = []
+        ipv6_addresses = []
+        for host in hosts:
+            hostnames.append(host.hostname)
+            ipv4_addresses.append(host.ipv4_addr)
+            ipv6_addresses.append(host.ipv6_addr)
+
+        # TODO - check hosts permissions here
+        response = self.build_accepted_response(req_id)
+        get_hosts_body = dict()
+        get_hosts_body[GetHostsResponseBody.hostnames] = hostnames
+        get_hosts_body[GetHostsResponseBody.ipv4_addresses] = ipv4_addresses
+        get_hosts_body[GetHostsResponseBody.ipv6_addresses] = ipv6_addresses
+        response[ResponseFields.body] = get_hosts_body
+        connection.send_message(json.dumps(response), True)
 
 
     def evaluate_get_configs_request(self, request, connection):
@@ -497,6 +525,109 @@ class SubscribedUserContext:
 
         # TODO test permissions
         return True
+
+
+
+class SearchContext:
+    """
+    An object describing an user search. The object is alive until the
+    user sends a SEARCH_STOP request.
+    """
+    # Used to get a new search id
+    search_ids = {}
+
+    # Used to get the current current valid search contexts
+    search_contexts = {}
+
+
+    @staticmethod
+    def get_context(username, search_id=None, database=None):
+        """
+        Gets a SearchContext.
+        username: The username for which the context should be returned.
+        req_id: If None, a new search context will be returned. Else, it
+        should be a valid search id.
+        database: A Database object. It must be given if search_id is None.
+
+        Returns: A SearchContext for this search or None if the parameters
+        were invalid.
+        """
+        # A new Search Context
+        if search_id is None:
+            if not isinstance(database, Database):
+                return None
+            return SearchContext(username, database)
+
+        # Getting an existing valid Search Context
+        if search_id in SearchContext.search_contexts.keys():
+            search_context_key = SearchContext._compute_key(username, search_id)
+            return SearchContext.search_contexts[search_context_key]
+
+        # Invalid Search Context
+        return None
+
+
+    @staticmethod
+    def _compute_key(username, search_id):
+        return str(username) + str(search_id)
+
+
+    def __init__(self, username, database):
+        """ Should not be used directly. Use get_context() """
+        self.username = username
+        self.database = database
+
+        # Generate the search id - unique for each user
+        if username not in self.search_ids.keys():
+            self.search_ids[username] = 0
+        else:
+            self.search_ids[username] += 1
+        self.search_id = self.search_ids[username]
+
+        self.spec = None
+        self.sort = None
+        self.fields = None
+
+        self.cursor = None
+
+
+    def get_id(self):
+        return self.search_id
+
+
+    def search(self, spec, sort, fields):
+        self.fields = fields
+        self.spec = dict()
+        self.sort = sort
+
+        try:
+            for spec_key in spec.keys():
+                spec_value = spec[spec_key]
+                spec_comp_mode = spec_value[0]
+                if spec_comp_mode == 'in' or spec_comp_mode == 'nin':
+                    self.spec[spec_key] = {spec_comp_mode : spec_value[1:]}
+                else:
+                    self.spec[spec_key] = {spec_comp_mode : spec_value[1]}
+
+            collection_name = self.database.get_notifications_collection_name()
+            self.cursor = self.database.find(collection_name,
+                                             search_spec=self.spec,
+                                             sorted_fields=self.sort,\
+                                             returned_fields=self.fields,
+                                             tailable=True)
+        except:
+            logging.debug('ServerInterface: Invalid search request.',\
+                          exc_info=True)
+
+
+    def search_next(self):
+        if self.cursor is None:
+            return None
+
+
+    def search_stop(self):
+        search_context_key = self._compute_key(self.username, self.search_id)
+        del self.search_contexts[search_context_key]
 
 
 
@@ -728,6 +859,53 @@ class SubscribeGeneralRequest:
 
     def get_types(self):
         return self.types
+
+
+
+class SearchGeneralRequest:
+
+    def __init__(self, general_request):
+        self.body = general_request.get_body()
+
+
+    def sanity_check(self):
+        try:
+            self.spec = self.body[SearchGeneralRequestBody.spec]
+        except:
+            err_msg = 'ServerInterface: Missing spec field from'
+            err_msg += ' search request'
+            logging.warning(err_msg)
+            return False
+
+        try:
+            self.fields = self.body[SearchGeneralRequestBody.fields]
+        except:
+            err_msg = 'ServerInterface: Missing fields field from'
+            err_msg += ' search request'
+            logging.warning(err_msg)
+            return False
+
+        try:
+            self.sort = self.body[SearchGeneralRequestBody.sort]
+        except:
+            err_msg = 'ServerInterface: Missing sort field from'
+            err_msg += ' search request'
+            logging.warning(err_msg)
+            return False
+
+        return True
+
+
+    def get_spec(self):
+        return self.spec
+
+
+    def get_fields(self):
+        return self.fields
+
+
+    def get_sort(self):
+        return self.sort
 
 
 
@@ -1045,6 +1223,9 @@ class GeneralRequestBody:
       - "GET_MODULES": The requesting side wants to know which modules are
         installed and enabled on the Server. There isn't any associated body
         for this request.
+      - "GET_HOSTS": The requesting side wants to know which host entries are
+        in the Server's database. There isn't any associated body for this
+        type.
       - "GET_CONFIGS": The requesting side wants to get the current
         configurations of the Server. There isn't any associated body for this
         type.
@@ -1158,13 +1339,10 @@ class SearchGeneralRequestBody:
       [<field_name>, true|false], where the first element tells the name of
       the field to be sorted and the second element is the direction of sorting
       (true for Ascending, false for Descending).
-    * search_id: A search id which will be must for getting the next items
-      in the returned result.
     """
     fields = 'fields'
     spec = 'spec'
     sort = 'sort'
-    search_id = 'search_id'
 
 
 class SearchNextGeneralRequestBody:
@@ -1312,6 +1490,23 @@ class GetModulesResponseBody:
     modules = 'modules'
 
 
+class GetHostsResponseBody:
+    """
+    The respose for a 'GET_HOSTS' general request. Fields:
+    * hostnames: A list with the hostnames for the hosts in the database.
+    * ipv4_addresses: A list with the IPv4 addresses for the hosts in the
+      database.
+    * ipv6_addresses: A list with the IPv6 addresses for the hosts in the
+      database.
+
+    Note: hostnames[i], ipv4_addresses[i] and ipv6_addresses[i] reffer to
+    information about the same host (the i'th one in the database).
+    """
+    hostnames = 'hostnames'
+    ipv4_addresses = 'ipv4_addresses'
+    ipv6_addresses = 'ipv6_addresses'
+
+
 class GetConfigsResponseBody:
     """
     The response for a 'GET_CONFIGS' general request. Fields:
@@ -1332,10 +1527,13 @@ class SearchResponseBody:
     * current_position: An integer representing the current start position
       for this list with returned results in all the returned results.
     * total_results_count: An integer representing the total results count.
+    * search_id: An integer that must be used to get the next search results
+      or stop the search. It identifies searches on the server side.
     """
     results = 'results'
     current_position = 'current_position'
     total_results_count = 'total_results_count'
+    search_id = 'search_id'
 
 
 class GetUsersResponseBody:
