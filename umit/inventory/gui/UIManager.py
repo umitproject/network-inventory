@@ -23,6 +23,7 @@ import gobject
 import time
 import traceback
 from copy import copy
+import datetime
 
 from umit.inventory.gui.Configs import NIConfig
 from umit.inventory.common import NotificationTypes
@@ -34,6 +35,9 @@ ni_main_window_file = os.path.join(glade_files_path, 'ni_main.glade')
 ni_auth_window_file = os.path.join(glade_files_path, 'ni_auth_window.glade')
 ni_events_view_file = os.path.join(glade_files_path, 'ni_events_view.glade')
 ni_event_window_file = os.path.join(glade_files_path, 'ni_event_window.glade')
+ni_search_window_file = os.path.join(glade_files_path, 'ni_search_window.glade')
+ni_time_date_picker_file = os.path.join(glade_files_path,\
+                                        'ni_time_date_picker.glade')
 
 
 class NIUIManager(gobject.GObject):
@@ -217,7 +221,7 @@ class NIUIManager(gobject.GObject):
             return False
 
         return True
-            
+
 
     def init_events_view(self):
         builder = gtk.Builder()
@@ -263,6 +267,16 @@ class NIUIManager(gobject.GObject):
     def set_protocols(self, protocols):
         """ Sets the protocols that will be shown in the GUI """
         self.events_view_manager.set_protocols(protocols)
+
+
+    def set_hostnames(self, hostnames):
+        """ Sets the hostnames that will be shown in the GUI """
+        self.events_view_manager.set_hosts(hostnames)
+
+
+    def set_ips(self, ips):
+        """ Sets the IP addresses that will be shown in the GUI """
+        self.events_view_manager.set_ips(ips)
 
 
     # Login state handlers
@@ -340,6 +354,9 @@ class EventsViewManager(gobject.GObject):
                        NotificationTypes.critical : self.critical_cb,\
                        NotificationTypes.unknown : self.unknown_cb}
 
+        # Used for the window that is shown when the Find button is pressed
+        self.search_window_manager = SearchWindowManager(self.ui_manager)
+
         # Filter options
         self.events_shown = 0
         self.protocol_shown = self.ALL_PROTOCOLS_SHOWN
@@ -379,6 +396,25 @@ class EventsViewManager(gobject.GObject):
             self.protocols_model.set(iter, 0, protocol)
         self.protocols_shown_cbox.set_active(0)
         self.protocols_shown_cbox.set_model(self.protocols_model)
+
+        self.search_window_manager.set_protocols(protocols)
+
+
+    def set_hosts(self, hosts):
+        self.hosts_model = gtk.ListStore(gobject.TYPE_STRING)
+        cell = gtk.CellRendererText()
+        self.source_host_cbox.pack_start(cell, True)
+        self.source_host_cbox.add_attribute(cell, 'text', 0)
+        for host in hosts:
+            iter = self.hosts_model.append()
+            self.hosts_model.set(iter, 0, host)
+        self.source_host_cbox.set_model(self.hosts_model)
+
+        self.search_window_manager.set_hosts(hosts)
+
+
+    def set_ips(self, ips):
+        self.search_window_manager.set_ips(ips)
 
 
     def add_notification(self, notification):
@@ -562,8 +598,8 @@ class EventsViewManager(gobject.GObject):
 
 
     def on_find_events_button_clicked(self, find_events_button):
-        #TODO
-        pass
+        if not self.search_window_manager.window_is_shown():
+            self.search_window_manager.show_window(self.ui_manager.main_window)
 
 
     def on_receive_events_button_toggled(self, receive_events_button):
@@ -773,3 +809,258 @@ class EventWindowManager:
 
         return '<b>Type: <span foreground=\'%s\'>%s</span></b>' %\
                 (color, event_type)
+
+
+
+class SearchWindowManager:
+
+    def __init__(self, ui_manager):
+        self.ui_manager = ui_manager
+        self.window_shown = False
+        self.protocols = None
+        self.hosts = None
+        self.ips = None
+        self.protocols_model = None
+        self.hosts_model = None
+        self.ips_model = None
+
+        self.time_picker_shown = False
+
+
+    def set_ips(self, ips):
+        self.ips_model = gtk.ListStore(gobject.TYPE_STRING)
+        for ip in ips:
+            iter = self.ips_model.append()
+            self.ips_model.set(iter, 0, ip)
+        self.ips = ips
+
+
+    def set_hosts(self, hosts):
+        self.hosts_model = gtk.ListStore(gobject.TYPE_STRING)
+        for host in hosts:
+            iter = self.hosts_model.append()
+            self.hosts_model.set(iter, 0, host)
+        self.hosts = hosts
+
+
+    def set_protocols(self, protocols):
+        self.protocols_model = gtk.ListStore(gobject.TYPE_STRING)
+        iter = self.protocols_model.append()
+        self.protocols_model.set(iter, 0, 'All')
+        for protocol in protocols:
+            iter = self.protocols_model.append()
+            self.protocols_model.set(iter, 0, protocol)
+        self.protocols = protocols
+
+
+    def window_is_shown(self):
+        return self.window_shown
+
+
+    def show_window(self, parent_window):
+        self.parent_window = parent_window
+        self.window_shown = True
+        builder = gtk.Builder()
+        self.search_window = builder.add_from_file(ni_search_window_file)
+        self._build_objects(builder)
+        self.search_window.set_transient_for(parent_window)
+        self.search_window.set_destroy_with_parent(True)
+        self.search_window.show()
+
+
+    def _build_objects(self, builder):
+        self.search_window = builder.get_object('search_window')
+        self.hostname_combo = builder.get_object('hostname_combo')
+        self.ip_combo = builder.get_object('ip_combo')
+        self.protocol_combo = builder.get_object('protocol_combo')
+        self.start_time_button = builder.get_object('start_time_button')
+        self.end_time_button = builder.get_object('end_time_button')
+        self.info_cb = builder.get_object('info_checkbox')
+        self.recovery_cb = builder.get_object('recovery_checkbox')
+        self.warning_cb = builder.get_object('warning_checkbox')
+        self.security_cb = builder.get_object('security_checkbox')
+        self.critical_cb = builder.get_object('critical_checkbox')
+        self.unknown_cb = builder.get_object('unknown_checkbox')
+
+        self._init_handlers()
+        self._init_values()
+        self._init_widgets()
+
+
+    def _init_handlers(self):
+        self.search_window.connect('destroy', self.on_window_destroyed)
+        self.hostname_combo.connect('changed', self.on_hostname_changed)
+        self.ip_combo.connect('changed', self.on_ip_changed)
+        self.protocol_combo.connect('changed', self.on_protocol_changed)
+        self.start_time_button.connect('clicked', self.on_time_button_clicked,\
+                                       'start_time')
+        self.end_time_button.connect('clicked', self.on_time_button_clicked,\
+                                     'end_time')
+        self.info_cb.connect('toggled', self.on_type_cb_toggled)
+        self.recovery_cb.connect('toggled', self.on_type_cb_toggled)
+        self.warning_cb.connect('toggled', self.on_type_cb_toggled)
+        self.critical_cb.connect('toggled', self.on_type_cb_toggled)
+        self.security_cb.connect('toggled', self.on_type_cb_toggled)
+        self.unknown_cb.connect('toggled', self.on_type_cb_toggled)
+
+        # Mapping type buttons to their string values
+        self.type_map = {self.info_cb : NotificationTypes.info,\
+                         self.recovery_cb : NotificationTypes.recovery,\
+                         self.warning_cb : NotificationTypes.warning,\
+                         self.critical_cb : NotificationTypes.critical,\
+                         self.security_cb : NotificationTypes.security,\
+                         self.unknown_cb : NotificationTypes.unknown}
+
+
+    def _init_values(self):
+        self.hostname = None
+        self.ip_addr = None
+        self.protocol = None
+        self.start_time = None
+        self.end_time = None
+        self.shown_events_types = [NotificationTypes.info,\
+            NotificationTypes.warning, NotificationTypes.recovery,\
+            NotificationTypes.critical, NotificationTypes.security,\
+            NotificationTypes.unknown]
+
+
+    def _init_widgets(self):
+        self.ip_combo.set_model(self.ips_model)
+        ip_combo_entry = self.ip_combo.get_child()
+        ip_entry_completion = gtk.EntryCompletion()
+        ip_entry_completion.set_model(self.ips_model)
+        ip_entry_completion.set_text_column(0)
+        ip_entry_completion.set_inline_completion(True)
+        ip_combo_entry.set_completion(ip_entry_completion)
+        
+        self.hostname_combo.set_model(self.hosts_model)
+        host_combo_entry = self.hostname_combo.get_child()
+        host_entry_completion = gtk.EntryCompletion()
+        host_entry_completion.set_model(self.hosts_model)
+        host_entry_completion.set_text_column(0)
+        host_entry_completion.set_inline_completion(True)
+        host_combo_entry.set_completion(host_entry_completion)
+
+        cell = gtk.CellRendererText()
+        self.protocol_combo.pack_start(cell, True)
+        self.protocol_combo.add_attribute(cell, 'text', 0)
+        self.protocol_combo.set_model(self.protocols_model)
+        self.protocol_combo.set_active(0)
+
+
+    def on_window_destroyed(self, window):
+        self.window_shown = False
+        if self.time_picker_shown:
+            self.time_popup.destroy()
+
+
+    def on_hostname_changed(self, hostname_combo):
+        host_entry = hostname_combo.get_child()
+        self.hostname = host_entry.get_text()
+        if self.hostname is '':
+            self.hostname = None
+
+
+    def on_ip_changed(self, ip_combo):
+        ip_entry = ip_combo.get_child()
+        self.ip_addr = ip_entry.get_text()
+        if self.ip_addr is '':
+            self.ip_addr = None
+
+
+    def on_protocol_changed(self, protocol_combo):
+        iter = protocol_combo.get_active_iter()
+        if iter is not None:
+            self.protocol = self.protocols_model.get_value(iter, 0)
+            if self.protocol == 'All':
+                self.protocol = None
+        print self.protocol
+
+        
+    def on_time_button_clicked(self, time_button, target):
+        if self.time_picker_shown:
+            self.time_popup.destroy()
+        self.time_picker_shown = True
+
+        builder = gtk.Builder()
+        builder.add_from_file(ni_time_date_picker_file)
+        self.time_popup = builder.get_object('time_date_popup')
+        self.date_calendar = builder.get_object('date_calendar')
+        self.hour_spin = builder.get_object('hour_spin')
+        self.minute_spin = builder.get_object('minute_spin')
+        self.second_spin = builder.get_object('second_spin')
+        set_button = builder.get_object('set_button')
+        reset_button = builder.get_object('reset_button')
+
+        self.time_popup.set_transient_for(self.search_window)
+
+        # Set the position for the time-picker popup
+        parent_position = self.search_window.get_position()
+        cursor_position = self.search_window.get_pointer()
+        self.time_popup.move(parent_position[0] + cursor_position[0],\
+                             parent_position[1] + cursor_position[1])
+
+        # Connect the handlers
+        self.search_window.connect('focus-out-event',\
+                                   self.on_search_window_focus_out)
+        self.search_window.connect('button-press-event',\
+                                   self.on_search_window_button_press)
+        self.time_popup.connect('destroy', self.on_time_popup_destroyed)
+        set_button.connect('clicked', self.on_time_set_clicked,\
+                           time_button, target)
+        reset_button.connect('clicked', self.on_time_reset_clicked,\
+                             time_button, target)
+        self.time_popup.show()
+
+
+    def on_time_popup_destroyed(self, time_popup):
+        self.time_picker_shown = False
+
+
+    def on_time_set_clicked(self, set_button, time_button, target):
+        # Get the time information
+        year, month, day = self.date_calendar.get_date()
+        hour = self.hour_spin.get_value_as_int()
+        minute = self.minute_spin.get_value_as_int()
+        second = self.second_spin.get_value_as_int()
+
+        # Because the returned month is in 0-11 range
+        month += 1
+
+        date_time = datetime.datetime(year, month, day, hour, minute, second)
+        time_button.set_label(date_time.strftime('%B %d %Y %H:%M:%S'))
+
+        if target == 'start_time':
+            self.start_time = time.mktime(date_time.timetuple())
+        elif target == 'end_time':
+            self.end_time = time.mktime(date_time.timetuple())
+
+
+    def on_time_reset_clicked(self, reset_button, time_button, target):
+        time_button.set_label('Choose time...')
+        if target == 'start_time':
+            self.start_time = None
+        elif target == 'end_time':
+            self.end_time = None
+
+
+    def on_search_window_focus_out(self, search_window, event):
+        if not self.time_picker_shown:
+            return
+        self.time_popup.destroy()
+
+
+    def on_search_window_button_press(self, search_window, event):
+        if not self.time_picker_shown:
+            return
+        if event.type == gtk.gdk.BUTTON_PRESS:
+            self.time_popup.destroy()
+
+
+    def on_type_cb_toggled(self, type_cb):
+        active = type_cb.get_active()
+        type_value = self.type_map[type_cb]
+        if active and type_value not in self.shown_events_types:
+            self.shown_events_types.append(type_value)
+        if not active and type_value in self.shown_events_types:
+            self.shown_events_types.remove(type_value)
