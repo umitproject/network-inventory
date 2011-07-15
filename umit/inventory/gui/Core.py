@@ -22,6 +22,7 @@ from umit.inventory.gui.ServerCommunicator import NIServerCommunicator
 from umit.inventory.gui.UIManager import NIUIManager
 from umit.inventory.gui.ServerCommunicator import SubscribeRequest
 from umit.inventory.gui.ServerCommunicator import UnsubscribeRequest
+from umit.inventory.gui.ServerCommunicator import GetHostsRequest
 from umit.inventory.gui.Configs import NIConfig
 
 import gtk
@@ -93,6 +94,8 @@ class NICore(GObject):
         gobject.idle_add(self.ui_manager.set_run_state)
         gobject.idle_add(self.server_communicator.send_request,\
             SubscribeRequest(self.username, self.password))
+        gobject.idle_add(self.server_communicator.send_request,\
+            GetHostsRequest(self.username, self.password, self))
 
         self.conf.set_general_option(NIConfig.ni_server_username, self.username)
         self.conf.set_general_option(NIConfig.ni_server_host, self.host)
@@ -111,6 +114,16 @@ class NICore(GObject):
 
     def set_async_message_received(self, msg):
         gobject.idle_add(self.handle_async_message, msg)
+
+
+    def set_host_info(self, hostnames, ipv4_addresses, ipv6_addresses):
+        self.hostnames = hostnames
+        self.ipv4_addresses = ipv4_addresses
+        self.ipv6_addresses = ipv6_addresses
+
+        # TODO - decide what to do with IPv6 here.
+        gobject.idle_add(self.ui_manager.set_hostnames, hostnames)
+        gobject.idle_add(self.ui_manager.set_ips, ipv4_addresses)
 
 
     # Handlers

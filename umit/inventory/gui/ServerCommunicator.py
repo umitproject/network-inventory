@@ -147,6 +147,7 @@ class NIServerCommunicator(Thread):
             else:
                 self.sent_requests_lock.acquire()
                 try:
+                    print response
                     self.sent_requests[req_id].handle_response(response)
                 except:
                     traceback.print_exc()
@@ -456,3 +457,30 @@ class UnsubscribeRequest(Request):
         general_request['general_request_body'] = []
 
         Request.__init__(self, username, password, general_request)
+
+
+
+class GetHostsRequest(Request):
+
+    def __init__(self, username, password, core):
+        self.core = core
+
+        general_request = dict()
+        general_request['general_request_type'] = 'GET_HOSTS'
+        general_request['general_request_body'] = []
+
+        Request.__init__(self, username, password, general_request)
+
+
+    def handle_response(self, response):
+        try:
+            response_code = response['response_code']
+            response_body = response['body']
+            hostnames = response_body['hostnames']
+            ipv4_addresses = response_body['ipv4_addresses']
+            ipv6_addresses = response_body['ipv6_addresses']
+        except:
+            traceback.print_exc()
+            return
+
+        self.core.set_host_info(hostnames, ipv4_addresses, ipv6_addresses)    
