@@ -191,7 +191,6 @@ class ServerInterface:
         msg[ResponseFields.response_type] = 'SUBSCRIBE_RESPONSE'
         msg[ResponseFields.body] = notification.fields
         msg = json.dumps(msg)
-        print 'forwarding ...'
 
         for username in self.subscribed_users.keys():
             user_connection = self.users_connections[username]
@@ -252,11 +251,17 @@ class ServerInterface:
         print 'subscribe request from %s' % username
         user = self.user_system.get_user(username)
         req_id = request.get_request_id()
+
         general_request = GeneralRequest(request)
         if not general_request.sanity_check():
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
             return
+
         subscribe_request = SubscribeGeneralRequest(general_request)
         if not subscribe_request.sanity_check():
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
             return
 
         types = subscribe_request.get_types()
@@ -328,15 +333,119 @@ class ServerInterface:
 
 
     def evaluate_search_request(self, request, connection):
-        pass
+        username = request.get_username()
+        req_id = request.get_request_id()
+
+        general_request = GeneralRequest(request)
+        if not general_request.sanity_check():
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
+            return
+
+        search_request = SearchGeneralRequest(general_request)
+        if not search_request.sanity_check():
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
+            return
+
+        spec = search_request.get_spec()
+        sort = search_request.get_sort()
+        fields = search_request.get_fields()
+
+        search_context = SearchContext.get_context(username,\
+                database=self.shell.database)
+        results = search_context.search(spec, sort, fields)
+
+        if results is None:
+            response = self.build_invalid_response(req_id)
+        else:
+            count = search_context.get_count()
+            pos = search_context.get_current_position()
+            search_id = search_context.get_id()
+            search_body = dict()
+            search_body[SearchResponseBody.search_id] = search_id
+            search_body[SearchResponseBody.current_position] = pos
+            search_body[SearchResponseBody.results] = results
+            search_body[SearchResponseBody.total_results_count] = count
+            response = self.build_accepted_response(req_id)
+            response[ResponseFields.body] = search_body
+
+        connection.send_message(json.dumps(response), True)
 
 
     def evaluate_search_next_request(self, request, connection):
-        pass
+        username = request.get_username()
+        req_id = request.get_request_id()
+
+        general_request = GeneralRequest(request)
+        if not general_request.sanity_check():
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
+            return
+
+        search_request = SearchNextGeneralRequest(general_request)
+        if not search_request.sanity_check():
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
+            return
+
+        search_id = search_request.get_search_id()
+        search_context = SearchContext.get_context(username, search_id)
+        if search_context is None:
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
+            return
+
+        results = search_context.search_next()
+        if results is None:
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
+            return
+
+        count = search_context.get_count()
+        pos = search_context.get_current_position()
+        search_id = search_context.get_id()
+        search_body = dict()
+        search_body[SearchResponseBody.search_id] = search_id
+        search_body[SearchResponseBody.current_position] = pos
+        search_body[SearchResponseBody.results] = results
+        search_body[SearchResponseBody.total_results_count] = count
+        response = self.build_accepted_response(req_id)
+        response[ResponseFields.body] = search_body
+
+        connection.send_message(json.dumps(response), True)
 
 
     def evaluate_search_stop_request(self, request, connection):
-        pass
+        username = request.get_username()
+        req_id = request.get_request_id()
+
+        general_request = GeneralRequest(request)
+        if not general_request.sanity_check():
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
+            return
+
+        search_request = SearchStopGeneralRequest(general_request)
+        if not search_request.sanity_check():
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
+            return
+
+        search_id = search_request.get_search_id()
+        search_context = SearchContext.get_context(username, search_id)
+        if search_context is None:
+            response = self.build_invalid_response(req_id)
+            connection.send_message(json.dumps(response), True)
+            return
+
+        search_context.search_stop()
+
+
+        response = self.build_accepted_response(req_id)
+        response[ResponseFields.body] = search_body
+
+        connection.send_message(json.dumps(response), True)
 
 
     def evaluate_add_user_request(self, request, connection):
@@ -533,6 +642,8 @@ class SearchContext:
     An object describing an user search. The object is alive until the
     user sends a SEARCH_STOP request.
     """
+    page_size = 20
+
     # Used to get a new search id
     search_ids = {}
 
@@ -589,26 +700,29 @@ class SearchContext:
         self.fields = None
 
         self.cursor = None
+        self.cursor_position = 0
 
 
     def get_id(self):
         return self.search_id
 
 
+    def get_count(self):
+        if self.cursor is None:
+            return 0
+        return self.cursor.count()
+
+
+    def get_current_position(self):
+        return self.cursor_position
+
+
     def search(self, spec, sort, fields):
         self.fields = fields
-        self.spec = dict()
+        self.spec = spec
         self.sort = sort
 
         try:
-            for spec_key in spec.keys():
-                spec_value = spec[spec_key]
-                spec_comp_mode = spec_value[0]
-                if spec_comp_mode == 'in' or spec_comp_mode == 'nin':
-                    self.spec[spec_key] = {spec_comp_mode : spec_value[1:]}
-                else:
-                    self.spec[spec_key] = {spec_comp_mode : spec_value[1]}
-
             collection_name = self.database.get_notifications_collection_name()
             self.cursor = self.database.find(collection_name,
                                              search_spec=self.spec,
@@ -620,9 +734,20 @@ class SearchContext:
                           exc_info=True)
 
 
+        return self.search_next()
+
+
     def search_next(self):
         if self.cursor is None:
             return None
+
+        count = 0
+        results = []
+        while self.cursor.alive and count < SearchContext.page_size:
+            results.append(self.cursor.next())
+            count += 1
+            self.cursor += 1
+        return results
 
 
     def search_stop(self):
@@ -909,6 +1034,51 @@ class SearchGeneralRequest:
 
 
 
+class SearchNextGeneralRequest:
+
+    def __init__(self, general_request):
+        self.body = general_request.get_body()
+
+
+    def sanity_check(self):
+        try:
+            self.search_id = self.body[SearchNextGeneralRequestBody.search_id]
+        except:
+            err_msg = 'ServerInterface: Missing search_id field from'
+            err_msg += ' search request'
+            logging.warning(err_msg)
+            return False
+
+        return True
+
+
+    def get_search_id(self):
+        return self.search_id
+
+
+
+class SearchStopGeneralRequest:
+
+    def __init__(self, general_request):
+        self.body = general_request.get_body()
+
+    def sanity_check(self):
+        try:
+            self.search_id = self.body[SearchStopGeneralRequestBody.search_id]
+        except:
+            err_msg = 'ServerInterface: Missing search_id field from'
+            err_msg += ' search request'
+            logging.warning(err_msg)
+            return False
+
+        return True
+
+
+    def get_search_id(self):
+        return self.search_id
+
+
+
 class InterfaceDataConnection(Thread):
     """
     Connection where all the responses (except the CONNECT response) will be
@@ -1071,13 +1241,11 @@ class InterfaceDataConnection(Thread):
             return
 
         # Not a real time message
-        print 'in ...'
         self.message_queue_lock.acquire()
         self.message_queue.append(message)
         if not self.connected and len(self.message_queue) > self.max_messages:
             self.message_queue.popleft()
         self.message_queue_lock.release()
-        print '... and out'
 
 
     def check_time(self):
@@ -1355,10 +1523,10 @@ class SearchNextGeneralRequestBody:
     search_id = 'search_id'
 
 
-class SearchNextGeneralRequestBody:
+class SearchStopGeneralRequestBody:
     """
     The mandatory fields in a general request having request_type equal to
-    "SEARCH_NEXT":
+    "SEARCH_STOP":
     * search_id: The search for which we want to stop getting results. This
       must be equal to the search_id in the initial "SEARCH" request.
     """
