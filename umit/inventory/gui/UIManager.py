@@ -312,12 +312,7 @@ class EventsViewManager(gobject.GObject):
                             'Most Recent 75' : 75,\
                             'Most Recent 100' : 100}
 
-    TREE_MODEL_COL_HOST = 0
-    TREE_MODEL_COL_TYPE = 1
-    TREE_MODEL_COL_TIME = 2
-    TREE_MODEL_COL_PROT = 3
-    TREE_MODEL_COL_DESC = 4
-    TREE_MODEL_COL_NOTIF_OBJ = 5
+
 
     ALL_PROTOCOLS_SHOWN = 'All'
 
@@ -329,7 +324,8 @@ class EventsViewManager(gobject.GObject):
         
         # Get objects
         self.events_view = builder.get_object('events_view_top')
-        self.events_tree_view = builder.get_object('events_tree_view')
+        self.events_widget_container =\
+                builder.get_object('events_widget_container')
         self.find_events_button = builder.get_object('find_events_button')
         self.receive_events_button = builder.get_object('receive_events_button')
         self.filter_button = builder.get_object('filter_button')
@@ -357,6 +353,12 @@ class EventsViewManager(gobject.GObject):
         # Used for the window that is shown when the Find button is pressed
         self.search_window_manager = SearchWindowManager(self.ui_manager)
 
+        # The widget where the events will be shown
+        self.events_widget = EventsViewWidget(self.ui_manager,\
+                self.tree_model_visible_func, self)
+        self.events_widget_container.add(self.events_widget)
+        self.events_widget.show()
+
         # Filter options
         self.events_shown = 0
         self.protocol_shown = self.ALL_PROTOCOLS_SHOWN
@@ -364,7 +366,6 @@ class EventsViewManager(gobject.GObject):
         self.types_shown = []
 
         self.init_events_shown()
-        self.init_tree_view()
         self.init_handlers()
 
 
@@ -383,6 +384,9 @@ class EventsViewManager(gobject.GObject):
         self.events_shown_cbox.set_active(0)
         self.events_shown_cbox.set_model(self.events_shown_model)
 
+
+    def add_notification(self, notification):
+        self.events_widget.add_notification(notification)
 
     def set_protocols(self, protocols):
         self.protocols_model = gtk.ListStore(gobject.TYPE_STRING)
@@ -417,52 +421,13 @@ class EventsViewManager(gobject.GObject):
         self.search_window_manager.set_ips(ips)
 
 
-    def add_notification(self, notification):
-        # Not initialized the GUI yet
-        if self.events_model is None:
-            return
-
-        # Get the fields
-        try:
-            hostname = str(notification['hostname'])
-            ipv4 = str(notification['source_host_ipv4'])
-            ipv6 = str(notification['source_host_ipv6'])
-            notif_type = str(notification['event_type'])
-            protocol = str(notification['protocol'])
-            timestamp = float(notification['timestamp'])
-            short_desc = str(notification['short_description'])
-        except:
-            traceback.print_exc()
-            return
-
-        # Format the time
-        notif_time = time.ctime(timestamp)
-
-        # Format the source_host
-        source_host = hostname + ' '
-        if ipv4 is not '':
-            source_host += '(%s)' % ipv4
-        elif ipv6 is not '':
-            source_host += '(%s)' % ipv6
-
-        iter = self.events_model.prepend()
-
-        self.events_model.set(iter,\
-                              self.TREE_MODEL_COL_HOST, copy(source_host),\
-                              self.TREE_MODEL_COL_TYPE, copy(notif_type),\
-                              self.TREE_MODEL_COL_TIME, copy(notif_time),\
-                              self.TREE_MODEL_COL_PROT, copy(protocol),\
-                              self.TREE_MODEL_COL_DESC, copy(short_desc),\
-                              self.TREE_MODEL_COL_NOTIF_OBJ, copy(notification))
-
-
     @staticmethod
     def tree_model_visible_func(model, iter, user_data):
         events_view_manager = user_data
 
         # TODO host data
-        notif_type = model.get_value(iter, EventsViewManager.TREE_MODEL_COL_TYPE)
-        protocol = model.get_value(iter, EventsViewManager.TREE_MODEL_COL_PROT)
+        notif_type = model.get_value(iter, EventsViewWidget.TREE_MODEL_COL_TYPE)
+        protocol = model.get_value(iter, EventsViewWidget.TREE_MODEL_COL_PROT)
 
         # TODO look into this
         if notif_type is None or protocol is None:
@@ -483,88 +448,6 @@ class EventsViewManager(gobject.GObject):
         return True
 
 
-    def tree_view_col_data_func(self, column, cell, model, iter, model_col):
-        col_text = model.get_value(iter, model_col)
-        row_type = model.get_value(iter, self.TREE_MODEL_COL_TYPE)
-        cell.set_property('text', col_text)
-
-        if row_type == NotificationTypes.critical:
-            cell.set_property('background', '#B50D0D')
-            cell.set_property('foreground', '#FFFFFF')
-        elif row_type == NotificationTypes.warning:
-            cell.set_property('background', '#DB5A5A')
-            cell.set_property('foreground', '#FFFFFF')
-        else:
-            cell.set_property('background-set', False)
-            cell.set_property('foreground-set', False)
-
-
-    def init_tree_view(self):
-        """
-        Tree View columns: Source Host, Type, Time, Protocol, Short Description.
-        """
-        # Init model and it's filter
-        self.events_model = gtk.ListStore(gobject.TYPE_STRING,\
-                gobject.TYPE_STRING, gobject.TYPE_STRING,\
-                gobject.TYPE_STRING, gobject.TYPE_STRING,\
-                gobject.TYPE_PYOBJECT)
-        self.events_filter_model = self.events_model.filter_new()
-        self.events_filter_model.set_visible_func(EventsViewManager.tree_model_visible_func, self)
-
-        # Init tree view
-        self.events_tree_view.set_model(self.events_filter_model)
-
-        # 1. Source Host Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Source Host', cell)
-        col.set_min_width(150)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_HOST)
-        self.events_tree_view.append_column(col)
-
-        # 2. Type Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Event Type', cell)
-        col.set_min_width(100)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_TYPE)
-        self.events_tree_view.append_column(col)
-
-        # 3. Time Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Time', cell)
-        col.set_min_width(140)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_TIME)
-        self.events_tree_view.append_column(col)
-
-        # 4. Protocol Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Protocol', cell)
-        col.set_min_width(110)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_PROT)
-        self.events_tree_view.append_column(col)
-
-        # 5. Short Description Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Short Description', cell)
-        col.set_min_width(250)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_DESC)
-        self.events_tree_view.append_column(col)
-
-
     def init_handlers(self):
         self.find_events_button.connect('clicked',\
                 self.on_find_events_button_clicked)
@@ -579,15 +462,6 @@ class EventsViewManager(gobject.GObject):
         self.critical_cb.connect('toggled', self.on_not_all_cb_toggled)
         self.security_cb.connect('toggled', self.on_not_all_cb_toggled)
         self.unknown_cb.connect('toggled', self.on_not_all_cb_toggled)
-        self.events_tree_view.connect('row-activated',\
-                self.on_events_tree_view_row_activated, self)
-
-
-    def on_events_tree_view_row_activated(self, tree_view, path, col, data):
-        model = tree_view.get_model()
-        iter = model.get_iter(path)
-        notification = model.get_value(iter, self.TREE_MODEL_COL_NOTIF_OBJ)
-        self.ui_manager.event_show_request(notification)
 
 
     def checkbuttons_active(self):
@@ -631,7 +505,7 @@ class EventsViewManager(gobject.GObject):
         events_shown_str = self.events_shown_model.get_value(iter, 0)
         self.events_shown = self.events_shown_options[events_shown_str]
 
-        self.events_filter_model.refilter()
+        self.events_widget.refilter()
 
         self.ui_manager.emit('subscribe', self.protocol_shown,\
                              self.hosts_shown, self.types_shown)
@@ -1064,3 +938,162 @@ class SearchWindowManager:
             self.shown_events_types.append(type_value)
         if not active and type_value in self.shown_events_types:
             self.shown_events_types.remove(type_value)
+
+
+
+class EventsViewWidget(gtk.TreeView):
+
+    # Model columns
+    TREE_MODEL_COL_HOST = 0
+    TREE_MODEL_COL_TYPE = 1
+    TREE_MODEL_COL_TIME = 2
+    TREE_MODEL_COL_PROT = 3
+    TREE_MODEL_COL_DESC = 4
+    TREE_MODEL_COL_NOTIF_OBJ = 5
+
+
+    def __init__(self, ui_manager, filter_function=None,\
+                 filter_func_user_data=None):
+        self.ui_manager = ui_manager
+        self.filter_function = filter_function
+        self.filter_function_user_data = filter_func_user_data
+
+        gtk.TreeView.__init__(self)
+        
+        self._init_model()
+        self._init_columns()
+
+        self.connect('row-activated', self.on_row_activated)
+
+
+    def _init_model(self):
+        self.model = gtk.ListStore(gobject.TYPE_STRING,\
+                gobject.TYPE_STRING, gobject.TYPE_STRING,\
+                gobject.TYPE_STRING, gobject.TYPE_STRING,\
+                gobject.TYPE_PYOBJECT)
+        if self.filter_function is not None:
+            self.filter_model = self.model.filter_new()
+            self.filter_model.set_visible_func(self.filter_function,\
+                self.filter_function_user_data)
+            self.set_model(self.filter_model)
+        else:
+            self.set_model(self.model)
+
+
+    def _init_columns(self):
+
+        # 1. Source Host Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Source Host', cell)
+        col.set_min_width(150)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_HOST)
+        self.append_column(col)
+
+        # 2. Type Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Event Type', cell)
+        col.set_min_width(100)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_TYPE)
+        self.append_column(col)
+
+        # 3. Time Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Time', cell)
+        col.set_min_width(140)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_TIME)
+        self.append_column(col)
+
+        # 4. Protocol Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Protocol', cell)
+        col.set_min_width(110)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_PROT)
+        self.append_column(col)
+
+        # 5. Short Description Column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Short Description', cell)
+        col.set_min_width(250)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                               self.TREE_MODEL_COL_DESC)
+        self.append_column(col)
+
+        
+    def tree_view_col_data_func(self, column, cell, model, iter, model_col):
+        col_text = model.get_value(iter, model_col)
+        row_type = model.get_value(iter, self.TREE_MODEL_COL_TYPE)
+        cell.set_property('text', col_text)
+
+        if row_type == NotificationTypes.critical:
+            cell.set_property('background', '#B50D0D')
+            cell.set_property('foreground', '#FFFFFF')
+        elif row_type == NotificationTypes.warning:
+            cell.set_property('background', '#DB5A5A')
+            cell.set_property('foreground', '#FFFFFF')
+        else:
+            cell.set_property('background-set', False)
+            cell.set_property('foreground-set', False)
+
+
+    def on_row_activated(self, treeview, path, view_column):
+        iter = self.model.get_iter(path)
+        notification = self.model.get_value(iter, self.TREE_MODEL_COL_NOTIF_OBJ)
+        self.ui_manager.event_show_request(notification)
+
+
+    def add_notification(self, notification):
+        # Not initialized the GUI yet
+        if self.model is None:
+            return
+
+        # Get the fields
+        try:
+            hostname = str(notification['hostname'])
+            ipv4 = str(notification['source_host_ipv4'])
+            ipv6 = str(notification['source_host_ipv6'])
+            notif_type = str(notification['event_type'])
+            protocol = str(notification['protocol'])
+            timestamp = float(notification['timestamp'])
+            short_desc = str(notification['short_description'])
+        except:
+            traceback.print_exc()
+            return
+
+        # Format the time
+        notif_time = time.ctime(timestamp)
+
+        # Format the source_host
+        source_host = hostname + ' '
+        if ipv4 is not '':
+            source_host += '(%s)' % ipv4
+        elif ipv6 is not '':
+            source_host += '(%s)' % ipv6
+
+        iter = self.model.prepend()
+
+        self.model.set(iter,\
+                       self.TREE_MODEL_COL_HOST, copy(source_host),\
+                       self.TREE_MODEL_COL_TYPE, copy(notif_type),\
+                       self.TREE_MODEL_COL_TIME, copy(notif_time),\
+                       self.TREE_MODEL_COL_PROT, copy(protocol),\
+                       self.TREE_MODEL_COL_DESC, copy(short_desc),\
+                       self.TREE_MODEL_COL_NOTIF_OBJ, copy(notification))
+
+
+    def refilter(self):
+        if self.filter_function is not None:
+            self.filter_model.refilter()
