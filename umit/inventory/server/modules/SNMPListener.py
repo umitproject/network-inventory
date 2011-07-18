@@ -58,6 +58,9 @@ class SNMPListener(ListenerServerModule, ServerModule):
         self.check_community_string =\
                 self.options[SNMPListener.check_community_string]
 
+        Notification.register_class(SNMPv1Notification)
+        Notification.register_class(SNMPv2cNotification)
+
 
     def get_name(self):
         return 'SNMPListener'

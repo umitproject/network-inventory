@@ -99,6 +99,8 @@ class AgentListener(ListenerServerModule, ServerModule):
         # None, then the host is down
         self.hosts_command_port = {}
 
+        Notification.register_class(AgentNotification)
+
 
     def _generate_ssl_files(self):
         # Certificate and key files only for this session
@@ -362,10 +364,12 @@ class AgentSSLProtocol(LineReceiver):
 class AgentNotification(Notification):
     """ The notification class associated to this protocol """
 
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return 'AgentNotification'
 
-    def get_fields_class(self):
+    @staticmethod
+    def get_fields_class():
         return AgentNotificationFields
 
 

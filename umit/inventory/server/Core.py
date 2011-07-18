@@ -65,6 +65,8 @@ class ServerCore:
                                                 self.user_system, self.shell)
         self.shell.server_interface = self.server_interface
 
+        # Initialize the Notification system
+        Notification.registered_classes[Notification.get_name()] = Notification
 
         logging.info('Initialized ServerCore')
 
