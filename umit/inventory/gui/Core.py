@@ -39,9 +39,10 @@ class NICore(GObject):
     def __init__(self, configurations):
         GObject.__init__(self)
         self.conf = configurations
-        self.shell = NIShell(self)
         self.server_communicator = NIServerCommunicator(self, configurations)
         self.ui_manager = NIUIManager(self, configurations)
+        self.shell = NIShell(self)
+        self.ui_manager.shell = self.shell
 
         self._load_modules()
         self._init_handlers()
@@ -96,7 +97,8 @@ class NICore(GObject):
             SubscribeRequest(self.username, self.password))
         gobject.idle_add(self.server_communicator.send_request,\
             GetHostsRequest(self.username, self.password, self))
-
+        gobject.idle_add(self.shell.set_user_data, self.username, self.password)
+        
         self.conf.set_general_option(NIConfig.ni_server_username, self.username)
         self.conf.set_general_option(NIConfig.ni_server_host, self.host)
         self.conf.set_general_option(NIConfig.ni_server_port, self.port)
@@ -108,8 +110,8 @@ class NICore(GObject):
     def set_connection_failed(self):
         msg = 'Fatal Error: Connection closed by the Notifications Server'
         second_title = 'Shutting Down'
-        gobject.idle_add(self.ui_manager.show_run_state_error, msg, second_title)
-        gobject.idle_add(gtk.main_quit)
+        gobject.idle_add(self.ui_manager.show_run_state_error, msg,\
+                         second_title, True)
 
 
     def set_async_message_received(self, msg):

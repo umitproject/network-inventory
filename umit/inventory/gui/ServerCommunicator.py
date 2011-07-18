@@ -27,6 +27,8 @@ from copy import copy
 import socket
 import ssl
 
+import gobject
+
 from umit.inventory.common import message_delimiter
 
 
@@ -162,6 +164,7 @@ class NIServerCommunicator(Thread):
         self.requests_lock.release()
 
         for request in temp_pending_requests:
+            print request.serialize()
             sent_ok = self._send_msg_to_server(request.serialize())
             if not sent_ok:
                 request.sending_failed()
@@ -483,4 +486,99 @@ class GetHostsRequest(Request):
             traceback.print_exc()
             return
 
-        self.core.set_host_info(hostnames, ipv4_addresses, ipv6_addresses)    
+        self.core.set_host_info(hostnames, ipv4_addresses, ipv6_addresses)
+
+
+class SearchRequest(Request):
+
+    def __init__(self, username, password, spec, fields, sort, callback):
+        """
+        callback: A function with the following signature
+        callback(notifications_list=None, search_id=None, count=0, position=0,\
+                 failed=False).
+        """
+        self.callback = callback
+        
+        search_general_request = dict()
+        search_general_request['spec'] = spec
+        search_general_request['sort'] = sort
+        search_general_request['fields'] = fields
+
+        general_request = dict()
+        general_request['general_request_type'] = 'SEARCH'
+        general_request['general_request_body'] = search_general_request
+
+        Request.__init__(self, username, password, general_request)
+
+
+    def handle_response(self, response):
+        try:
+            response_code = response['response_code']
+            if response_code != 200:
+                gobject.idle_add(self.callback, None, None, 0, True)
+                return
+    
+            response_body = response['body']
+            results = response_body['results']
+            search_id = response_body['search_id']
+            count = response_body['total_results_count']
+        except:
+            traceback.print_exc()
+            gobject.idle_add(self.callback,  None, None, 0, True)
+            return
+
+        gobject.idle_add(self.callback, results, search_id, count)
+
+
+
+class SearchNextRequest(Request):
+
+    def __init__(self, username, password, search_id, start_index, callback):
+        """
+        callback: A function with the following signature
+        callback(notifications_list=None, search_id=None, count=0, failed=False)
+        """
+        self.callback = callback
+
+        search_general_request = dict()
+        search_general_request['search_id'] = search_id
+        search_general_request['start_index'] = start_index
+
+        general_request = dict()
+        general_request['general_request_type'] = 'SEARCH_NEXT'
+        general_request['general_request_body'] = search_general_request
+
+        Request.__init__(self, username, password, general_request)
+
+
+    def handle_response(self, response):
+        try:
+            response_code = response['response_code']
+            if response_code != 200:
+                gobject.idle_add(self.callback, None, None, 0, True)
+                return
+
+            response_body = response['body']
+            results = response_body['results']
+            search_id = response_body['search_id']
+            count = response_body['total_results_count']
+        except:
+            traceback.print_exc()
+            gobject.idle_add(self.callback,  None, None, 0, True)
+            return
+
+        gobject.idle_add(self.callback, results, search_id, count)
+
+
+
+class SearchStopRequest(Request):
+
+    def __init__(self, username, password, search_id):
+        search_general_request = dict()
+        search_general_request['search_id'] = search_id
+
+        general_request = dict()
+        general_request['general_request_type'] = 'SEARCH_STOP'
+        general_request['general_request_body'] = search_general_request
+
+        Request.__init__(self, username, password, general_request)

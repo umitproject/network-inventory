@@ -38,7 +38,8 @@ ni_event_window_file = os.path.join(glade_files_path, 'ni_event_window.glade')
 ni_search_window_file = os.path.join(glade_files_path, 'ni_search_window.glade')
 ni_time_date_picker_file = os.path.join(glade_files_path,\
                                         'ni_time_date_picker.glade')
-
+ni_search_results_window = os.path.join(glade_files_path,\
+                                        'ni_search_results_window.glade')
 
 class NIUIManager(gobject.GObject):
     __gsignals__ = {
@@ -140,23 +141,25 @@ class NIUIManager(gobject.GObject):
         error_dialog.set_property('text', error_second_title)
         error_dialog.set_title('Authentication Error')
         error_dialog.set_property('secondary-text', error_msg)
-        error_dialog.connect('response', self.on_dialog_response)
+        error_dialog.connect('response', self.on_dialog_response, False)
         error_dialog.show()
 
 
-    def show_run_state_error(self, error_msg, error_second_title):
+    def show_run_state_error(self, error_msg, error_second_title, fatal=False):
         error_dialog = gtk.MessageDialog(parent=self.main_window,\
                                          type=gtk.MESSAGE_ERROR,\
                                          buttons=gtk.BUTTONS_OK)
         error_dialog.set_property('text', error_second_title)
         error_dialog.set_title('Runtime Error')
         error_dialog.set_property('secondary-text', error_msg)
-        error_dialog.connect('response', self.on_dialog_response)
+        error_dialog.connect('response', self.on_dialog_response, fatal)
         error_dialog.show()
 
 
-    def on_dialog_response(self, dialog, response_id):
+    def on_dialog_response(self, dialog, response_id, fatal):
         dialog.destroy()
+        if fatal:
+            gtk.main_quit()
 
 
     def init_auth_window_text_entries(self):
@@ -238,9 +241,9 @@ class NIUIManager(gobject.GObject):
                 EventWindowManager(ni_event_window_file, self)
 
 
-    def event_show_request(self, notification):
+    def event_show_request(self, notification, parent_window):
         if self.event_window_manager is not None:
-            self.event_window_manager.show_event(notification, self.main_window)
+            self.event_window_manager.show_event(notification, parent_window)
             cont = self.event_window_manager.get_module_container()
             label = self.event_window_manager.get_module_label()
             self.emit('show-event-details', notification, cont, label)
@@ -387,6 +390,7 @@ class EventsViewManager(gobject.GObject):
 
     def add_notification(self, notification):
         self.events_widget.add_notification(notification)
+
 
     def set_protocols(self, protocols):
         self.protocols_model = gtk.ListStore(gobject.TYPE_STRING)
@@ -606,6 +610,7 @@ class EventWindowManager:
         # Show the window
         self.event_window.set_transient_for(parent_window)
         self.event_window.set_destroy_with_parent(True)
+        self.event_window.set_modal(True)
         self.event_window.show()
 
 
@@ -690,6 +695,8 @@ class SearchWindowManager:
 
     def __init__(self, ui_manager):
         self.ui_manager = ui_manager
+        self.search_results_manager = SearchResultsManager(ui_manager)
+    
         self.window_shown = False
         self.protocols = None
         self.hosts = None
@@ -755,6 +762,8 @@ class SearchWindowManager:
         self.security_cb = builder.get_object('security_checkbox')
         self.critical_cb = builder.get_object('critical_checkbox')
         self.unknown_cb = builder.get_object('unknown_checkbox')
+        self.find_button = builder.get_object('find_button')
+        self.close_button = builder.get_object('close_button')
 
         self._init_handlers()
         self._init_values()
@@ -776,6 +785,9 @@ class SearchWindowManager:
         self.critical_cb.connect('toggled', self.on_type_cb_toggled)
         self.security_cb.connect('toggled', self.on_type_cb_toggled)
         self.unknown_cb.connect('toggled', self.on_type_cb_toggled)
+        self.find_button.connect('clicked', self.on_find_button_clicked)
+        self.close_button.connect('clicked', self.on_close_button_clicked)
+
 
         # Mapping type buttons to their string values
         self.type_map = {self.info_cb : NotificationTypes.info,\
@@ -822,6 +834,38 @@ class SearchWindowManager:
         self.protocol_combo.set_active(0)
 
 
+    def on_find_button_clicked(self, find_button):
+        # Showing all fields
+        fields = None
+
+        # Sorting descending by timestamp
+        sort = [('timestamp', False)]
+
+        # Conditions to show the events
+        spec = dict()
+        if self.hostname:
+            spec['hostname'] = {'$in' : [self.hostname.strip()]}
+        if self.ip_addr:
+            spec['source_host_ipv4'] = {'$in': [self.ip_addr.strip()]}
+        if self.protocol:
+            spec['protocol'] = {'$in' : [self.protocol.strip()]}
+        spec['event_type'] = {'$in' : self.shown_events_types}
+
+        if self.start_time or self.end_time:
+            spec['timestamp'] = dict()
+        if self.start_time:
+            spec['timestamp']['$gt'] = self.start_time
+        if self.end_time:
+            spec['timestamp']['$lt'] = self.end_time
+
+        self.ui_manager.shell.search_notifications(spec, sort, fields,\
+                self.search_callback_function)
+
+
+    def on_close_button_clicked(self, close_button):
+        self.search_window.destroy()
+        
+
     def on_window_destroyed(self, window):
         self.window_shown = False
         if self.time_picker_shown:
@@ -848,7 +892,6 @@ class SearchWindowManager:
             self.protocol = self.protocols_model.get_value(iter, 0)
             if self.protocol == 'All':
                 self.protocol = None
-        print self.protocol
 
         
     def on_time_button_clicked(self, time_button, target):
@@ -938,6 +981,140 @@ class SearchWindowManager:
             self.shown_events_types.append(type_value)
         if not active and type_value in self.shown_events_types:
             self.shown_events_types.remove(type_value)
+
+
+    def search_callback_function(self, notifications_list=None,\
+            search_id=None, count=0, position=0, failed=False):
+        if failed:
+            self.ui_manager.show_run_state_error("", "Searching failed")
+            self.search_window.destroy()
+            return
+        self.search_window.destroy()
+        self.search_window = None
+        self.search_results_manager.show_results(notifications_list,\
+                search_id, count)
+
+
+
+class SearchResultsManager:
+
+    def __init__(self, ui_manager):
+        self.ui_manager = ui_manager
+        self.position = 0
+        self.current_page_len = 0
+        self.expected_position = 0
+        self.search_id = 0
+        self.count = 0
+        self.page_size = 0
+
+
+    def show_results(self, notifications_list, search_id=None,\
+                     count=0):
+        try:
+            self.current_page_len = len(notifications_list)
+        except:
+            self.current_page_len = 0
+        self.count = count
+        
+        if search_id is not None:
+            self._build_objects()
+            self._initialize_objects()
+            self.search_id = search_id
+            self.position = 0
+            if self.current_page_len < count:
+                self.page_size = self.current_page_len
+
+        self._populate_results(notifications_list)
+
+
+    def _build_objects(self):
+        builder = gtk.Builder()
+        builder.add_from_file(ni_search_results_window)
+        self.results_window = builder.get_object('search_results_window')
+        self.status_label = builder.get_object('status_label')
+        self.next_button = builder.get_object('next_button')
+        self.prev_button = builder.get_object('prev_button')
+        self.close_button = builder.get_object('close_button')
+        self.events_widget_container =\
+                builder.get_object('events_widget_container')
+        self.events_widget = EventsViewWidget(self.ui_manager)
+        self.events_widget_container.add(self.events_widget)
+
+        self.results_window.set_transient_for(self.ui_manager.main_window)
+        self.results_window.set_modal(True)
+
+        self.events_widget.show()
+        self.results_window.show()
+
+
+    def _initialize_objects(self):
+        # Initialize Previous and Next buttons
+        self.prev_button.set_sensitive(False)
+        if self.count == self.current_page_len:
+            self.next_button.set_sensitive(False)
+        self.prev_button.connect('clicked', self.on_prev_button_clicked)
+        self.next_button.connect('clicked', self.on_next_button_clicked)
+
+
+    def _populate_results(self, notifications_list):
+        self.events_widget.clear()
+        if self.current_page_len is 0:
+            markup = '<b>No results found</b>'
+            self.status_label.set_markup(markup)
+            return
+
+        markup = '<b> Showing results %d-%d out of %d</b>' % (self.position + 1,\
+                self.position + self.current_page_len, self.count)
+        self.status_label.set_markup(markup)
+
+        for notification in notifications_list:
+            self.events_widget.add_notification(notification)
+
+
+    def search_next_callback(self, notifications_list=None,\
+                             search_id=None, count=0, failed=False):
+        if failed:
+            msg = "The Notifications Server didn't respond to the request"
+            self.ui_manager.show_run_state_error(msg, "Searching failed", False)
+            self.results_window.destroy()
+            return
+        self.current_page_len = len(notifications_list)
+
+        self.position = self.expected_position
+        if self.expected_position is 0:
+            self.prev_button.set_sensitive(False)
+        else:
+            self.prev_button.set_sensitive(True)
+
+        self.position = self.expected_position
+        if self.expected_position + self.current_page_len >= self.count:
+            self.next_button.set_sensitive(False)
+        else:
+            self.next_button.set_sensitive(True)
+        
+        self._populate_results(notifications_list)
+
+
+    def on_prev_button_clicked(self, prev_button):
+        prev_position =  max(0, self.position - self.page_size)
+        self.ui_manager.shell.get_next_search_results(self.search_id,\
+                prev_position, self.search_next_callback)
+        self.expected_position = prev_position
+        print '# prev_position %d' % prev_position
+        # Don't allow users to click on the next/prev buttons until the update
+        self.next_button.set_sensitive(False)
+        self.prev_button.set_sensitive(False)
+
+
+    def on_next_button_clicked(self, next_button):
+        self.ui_manager.shell.get_next_search_results(self.search_id,\
+                self.position + self.current_page_len,\
+                self.search_next_callback)
+        self.expected_position = self.position + self.current_page_len
+
+        # Don't allow users to click on the next/prev buttons until the update
+        self.next_button.set_sensitive(False)
+        self.prev_button.set_sensitive(False)
 
 
 
@@ -1052,7 +1229,8 @@ class EventsViewWidget(gtk.TreeView):
     def on_row_activated(self, treeview, path, view_column):
         iter = self.model.get_iter(path)
         notification = self.model.get_value(iter, self.TREE_MODEL_COL_NOTIF_OBJ)
-        self.ui_manager.event_show_request(notification)
+        self.ui_manager.event_show_request(notification,\
+                                           self.get_toplevel())
 
 
     def add_notification(self, notification):
@@ -1097,3 +1275,8 @@ class EventsViewWidget(gtk.TreeView):
     def refilter(self):
         if self.filter_function is not None:
             self.filter_model.refilter()
+
+
+    def clear(self):
+        print 'clearing ...'
+        self.model.clear()
