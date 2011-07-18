@@ -248,7 +248,6 @@ class ServerInterface:
 
     def evaluate_subscribe_request(self, request, connection):
         username = request.get_username()
-        print 'subscribe request from %s' % username
         user = self.user_system.get_user(username)
         req_id = request.get_request_id()
 
@@ -360,11 +359,9 @@ class ServerInterface:
             response = self.build_invalid_response(req_id)
         else:
             count = search_context.get_count()
-            pos = search_context.get_current_position()
             search_id = search_context.get_id()
             search_body = dict()
             search_body[SearchResponseBody.search_id] = search_id
-            search_body[SearchResponseBody.current_position] = pos
             search_body[SearchResponseBody.results] = results
             search_body[SearchResponseBody.total_results_count] = count
             response = self.build_accepted_response(req_id)
@@ -377,37 +374,36 @@ class ServerInterface:
         username = request.get_username()
         req_id = request.get_request_id()
 
+        print '1'
         general_request = GeneralRequest(request)
         if not general_request.sanity_check():
             response = self.build_invalid_response(req_id)
             connection.send_message(json.dumps(response), True)
             return
-
+        print '2'
         search_request = SearchNextGeneralRequest(general_request)
         if not search_request.sanity_check():
             response = self.build_invalid_response(req_id)
             connection.send_message(json.dumps(response), True)
             return
-
+        print '3'
         search_id = search_request.get_search_id()
         search_context = SearchContext.get_context(username, search_id)
         if search_context is None:
             response = self.build_invalid_response(req_id)
             connection.send_message(json.dumps(response), True)
             return
-
-        results = search_context.search_next()
+        print '4'
+        results = search_context.search_next(search_request.get_start_index())
         if results is None:
             response = self.build_invalid_response(req_id)
             connection.send_message(json.dumps(response), True)
             return
-
+        print '5'
         count = search_context.get_count()
-        pos = search_context.get_current_position()
         search_id = search_context.get_id()
         search_body = dict()
         search_body[SearchResponseBody.search_id] = search_id
-        search_body[SearchResponseBody.current_position] = pos
         search_body[SearchResponseBody.results] = results
         search_body[SearchResponseBody.total_results_count] = count
         response = self.build_accepted_response(req_id)
@@ -443,7 +439,6 @@ class ServerInterface:
 
 
         response = self.build_accepted_response(req_id)
-        response[ResponseFields.body] = search_body
 
         connection.send_message(json.dumps(response), True)
 
@@ -670,8 +665,8 @@ class SearchContext:
             return SearchContext(username, database)
 
         # Getting an existing valid Search Context
-        if search_id in SearchContext.search_contexts.keys():
-            search_context_key = SearchContext._compute_key(username, search_id)
+        search_context_key = SearchContext._compute_key(username, search_id)
+        if search_context_key in SearchContext.search_contexts.keys():
             return SearchContext.search_contexts[search_context_key]
 
         # Invalid Search Context
@@ -695,12 +690,16 @@ class SearchContext:
             self.search_ids[username] += 1
         self.search_id = self.search_ids[username]
 
+        # Save the search context
+        self_key = self._compute_key(username, self.search_id)
+        SearchContext.search_contexts[self_key] = self
+
         self.spec = None
         self.sort = None
         self.fields = None
 
         self.cursor = None
-        self.cursor_position = 0
+        self.cursor_count = 0
 
 
     def get_id(self):
@@ -710,43 +709,43 @@ class SearchContext:
     def get_count(self):
         if self.cursor is None:
             return 0
-        return self.cursor.count()
-
-
-    def get_current_position(self):
-        return self.cursor_position
+        return self.cursor_count
 
 
     def search(self, spec, sort, fields):
         self.fields = fields
         self.spec = spec
         self.sort = sort
-
+    
         try:
             collection_name = self.database.get_notifications_collection_name()
             self.cursor = self.database.find(collection_name,
                                              search_spec=self.spec,
                                              sorted_fields=self.sort,\
                                              returned_fields=self.fields,
-                                             tailable=True)
+                                             tailable=False)
+            self.cursor_count = self.cursor.count()
         except:
             logging.debug('ServerInterface: Invalid search request.',\
                           exc_info=True)
 
+        return self.search_next(0)
 
-        return self.search_next()
 
-
-    def search_next(self):
+    def search_next(self, start_index):
         if self.cursor is None:
             return None
 
-        count = 0
+        if start_index >= self.cursor_count:
+            return []
+
+        end_index = min(self.cursor_count, start_index + self.page_size)
         results = []
-        while self.cursor.alive and count < SearchContext.page_size:
-            results.append(self.cursor.next())
-            count += 1
-            self.cursor += 1
+        for index in range(start_index, end_index):
+            result = self.cursor[index]
+            notification = Notification(result)
+            results.append(notification.fields)
+
         return results
 
 
@@ -1049,11 +1048,25 @@ class SearchNextGeneralRequest:
             logging.warning(err_msg)
             return False
 
+
+        try:
+            self.start_index =\
+                    self.body[SearchNextGeneralRequestBody.start_index]
+        except:
+            err_msg = 'ServerInterface: Missing start_index field from'
+            err_msg += ' search request'
+            logging.warning(err_msg)
+            return False
+
         return True
 
 
     def get_search_id(self):
         return self.search_id
+
+
+    def get_start_index(self):
+        return self.start_index
 
 
 
@@ -1519,8 +1532,12 @@ class SearchNextGeneralRequestBody:
     "SEARCH_NEXT":
     * search_id: The Search for which we want to get the next results. This
       must be equal to the search_id in the initial "SEARCH" request.
+    * start_index: The start index in the vector of the search results. The
+      size of the returned vector will be less or equal with the size of a
+      page.
     """
     search_id = 'search_id'
+    start_index = 'start_index'
 
 
 class SearchStopGeneralRequestBody:
@@ -1692,14 +1709,11 @@ class SearchResponseBody:
     The response for a 'SEARCH' and 'SEARCH_NEXT' general requests. Fields:
     * results: A list with the results JSON serialized as it was requested
       in the first 'SEARCH' request.
-    * current_position: An integer representing the current start position
-      for this list with returned results in all the returned results.
     * total_results_count: An integer representing the total results count.
     * search_id: An integer that must be used to get the next search results
       or stop the search. It identifies searches on the server side.
     """
     results = 'results'
-    current_position = 'current_position'
     total_results_count = 'total_results_count'
     search_id = 'search_id'
 
