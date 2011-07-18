@@ -917,6 +917,23 @@ class SearchWindowManager:
         self.time_popup.move(parent_position[0] + cursor_position[0],\
                              parent_position[1] + cursor_position[1])
 
+        # Initialize the time
+        if target == 'start_time':
+            time_value = self.start_time
+        else:
+            time_value = self.end_time
+
+        # If we don't have a value set, set the current time
+        if time_value is None:
+            crt_time = datetime.datetime.fromtimestamp(time.time())
+        else:
+            crt_time = datetime.datetime.fromtimestamp(time_value)
+        self.date_calendar.select_month(crt_time.month - 1, crt_time.year)
+        self.date_calendar.select_day(crt_time.day)
+        self.hour_spin.set_value(crt_time.hour)
+        self.minute_spin.set_value(crt_time.minute)
+        self.second_spin.set_value(crt_time.second)
+
         # Connect the handlers
         self.search_window.connect('focus-out-event',\
                                    self.on_search_window_focus_out)
@@ -952,6 +969,8 @@ class SearchWindowManager:
         elif target == 'end_time':
             self.end_time = time.mktime(date_time.timetuple())
 
+        self.time_popup.destroy()
+
 
     def on_time_reset_clicked(self, reset_button, time_button, target):
         time_button.set_label('Choose time...')
@@ -959,6 +978,8 @@ class SearchWindowManager:
             self.start_time = None
         elif target == 'end_time':
             self.end_time = None
+            
+        self.time_popup.destroy()
 
 
     def on_search_window_focus_out(self, search_window, event):
@@ -1100,7 +1121,7 @@ class SearchResultsManager:
         self.ui_manager.shell.get_next_search_results(self.search_id,\
                 prev_position, self.search_next_callback)
         self.expected_position = prev_position
-        print '# prev_position %d' % prev_position
+
         # Don't allow users to click on the next/prev buttons until the update
         self.next_button.set_sensitive(False)
         self.prev_button.set_sensitive(False)
@@ -1278,5 +1299,4 @@ class EventsViewWidget(gtk.TreeView):
 
 
     def clear(self):
-        print 'clearing ...'
         self.model.clear()
