@@ -40,6 +40,10 @@ ni_time_date_picker_file = os.path.join(glade_files_path,\
                                         'ni_time_date_picker.glade')
 ni_search_results_window = os.path.join(glade_files_path,\
                                         'ni_search_results_window.glade')
+ni_hosts_view_file = os.path.join(glade_files_path, 'ni_hosts_view.glade')
+ni_reports_hosts_view = os.path.join(glade_files_path,\
+                                     'ni_reports_hosts_view.glade')
+
 
 class NIUIManager(gobject.GObject):
     __gsignals__ = {
@@ -88,6 +92,7 @@ class NIUIManager(gobject.GObject):
         self.init_main_window()
         self.init_auth_window()
         self.init_events_view()
+        self.init_hosts_view()
         self.init_event_window()
 
 
@@ -236,6 +241,17 @@ class NIUIManager(gobject.GObject):
                                      gtk.Label('Network Events'), 0)
 
 
+    def init_hosts_view(self):
+        builder = gtk.Builder()
+        builder.add_from_file(ni_hosts_view_file)
+        self.hosts_view_manager = HostsViewManager(builder, self)
+        self.hosts_view = builder.get_object('hosts_view_top')
+        self.hosts_view.unparent()
+        self.ni_notebook.insert_page(self.hosts_view,\
+                                     gtk.Label('Network Hosts'), 1)
+        self.hosts_view_manager.add_host_detail_view(ReportsHostsView(self))
+
+
     def init_event_window(self):
         self.event_window_manager =\
                 EventWindowManager(ni_event_window_file, self)
@@ -275,11 +291,13 @@ class NIUIManager(gobject.GObject):
     def set_hostnames(self, hostnames):
         """ Sets the hostnames that will be shown in the GUI """
         self.events_view_manager.set_hosts(hostnames)
+        self.hosts_view_manager.set_hosts(hostnames)
 
 
     def set_ips(self, ips):
         """ Sets the IP addresses that will be shown in the GUI """
         self.events_view_manager.set_ips(ips)
+        self.hosts_view_manager.set_ips(ips)
 
 
     # Login state handlers
@@ -705,8 +723,6 @@ class SearchWindowManager:
         self.hosts_model = None
         self.ips_model = None
 
-        self.time_picker_shown = False
-
 
     def set_ips(self, ips):
         self.ips_model = gtk.ListStore(gobject.TYPE_STRING)
@@ -765,6 +781,9 @@ class SearchWindowManager:
         self.find_button = builder.get_object('find_button')
         self.close_button = builder.get_object('close_button')
 
+        self.time_picker_manager = TimePickerManager(\
+                ['start_time', 'end_time'], self.search_window)
+
         self._init_handlers()
         self._init_values()
         self._init_widgets()
@@ -787,6 +806,7 @@ class SearchWindowManager:
         self.unknown_cb.connect('toggled', self.on_type_cb_toggled)
         self.find_button.connect('clicked', self.on_find_button_clicked)
         self.close_button.connect('clicked', self.on_close_button_clicked)
+        self.time_picker_manager.connect('value-changed', self.on_time_changed)
 
 
         # Mapping type buttons to their string values
@@ -858,6 +878,9 @@ class SearchWindowManager:
         if self.end_time:
             spec['timestamp']['$lt'] = self.end_time
 
+        # Not searching reports
+        spec['is_report'] = {'$ne' : True}
+
         self.ui_manager.shell.search_notifications(spec, sort, fields,\
                 self.search_callback_function)
 
@@ -868,8 +891,7 @@ class SearchWindowManager:
 
     def on_window_destroyed(self, window):
         self.window_shown = False
-        if self.time_picker_shown:
-            self.time_popup.destroy()
+        self.time_picker_manager.close()
 
 
     def on_hostname_changed(self, hostname_combo):
@@ -895,104 +917,28 @@ class SearchWindowManager:
 
         
     def on_time_button_clicked(self, time_button, target):
-        if self.time_picker_shown:
-            self.time_popup.destroy()
-        self.time_picker_shown = True
+        self.time_picker_manager.choose_value(target)
 
-        builder = gtk.Builder()
-        builder.add_from_file(ni_time_date_picker_file)
-        self.time_popup = builder.get_object('time_date_popup')
-        self.date_calendar = builder.get_object('date_calendar')
-        self.hour_spin = builder.get_object('hour_spin')
-        self.minute_spin = builder.get_object('minute_spin')
-        self.second_spin = builder.get_object('second_spin')
-        set_button = builder.get_object('set_button')
-        reset_button = builder.get_object('reset_button')
 
-        self.time_popup.set_transient_for(self.search_window)
-
-        # Set the position for the time-picker popup
-        parent_position = self.search_window.get_position()
-        cursor_position = self.search_window.get_pointer()
-        self.time_popup.move(parent_position[0] + cursor_position[0],\
-                             parent_position[1] + cursor_position[1])
-
-        # Initialize the time
-        if target == 'start_time':
-            time_value = self.start_time
+    def on_time_changed(self, time_manager, target_name, target_value):
+        if target_value == -1.0:
+            button_text = 'Choose Time ...'
         else:
-            time_value = self.end_time
+            date_time = datetime.datetime.fromtimestamp(target_value)
+            button_text = date_time.strftime('%B %d %Y %H:%M:%S')
 
-        # If we don't have a value set, set the current time
-        if time_value is None:
-            crt_time = datetime.datetime.fromtimestamp(time.time())
-        else:
-            crt_time = datetime.datetime.fromtimestamp(time_value)
-        self.date_calendar.select_month(crt_time.month - 1, crt_time.year)
-        self.date_calendar.select_day(crt_time.day)
-        self.hour_spin.set_value(crt_time.hour)
-        self.minute_spin.set_value(crt_time.minute)
-        self.second_spin.set_value(crt_time.second)
+        target_button = None
+        if target_name == 'start_time':
+            target_button = self.start_time_button
+            self.start_time = target_value if target_value != -1.0 else None
+        elif target_name == 'end_time':
+            target_button = self.end_time_button
+            self.end_time = target_value if target_value != -1.0 else None
 
-        # Connect the handlers
-        self.search_window.connect('focus-out-event',\
-                                   self.on_search_window_focus_out)
-        self.search_window.connect('button-press-event',\
-                                   self.on_search_window_button_press)
-        self.time_popup.connect('destroy', self.on_time_popup_destroyed)
-        set_button.connect('clicked', self.on_time_set_clicked,\
-                           time_button, target)
-        reset_button.connect('clicked', self.on_time_reset_clicked,\
-                             time_button, target)
-        self.time_popup.show()
-
-
-    def on_time_popup_destroyed(self, time_popup):
-        self.time_picker_shown = False
-
-
-    def on_time_set_clicked(self, set_button, time_button, target):
-        # Get the time information
-        year, month, day = self.date_calendar.get_date()
-        hour = self.hour_spin.get_value_as_int()
-        minute = self.minute_spin.get_value_as_int()
-        second = self.second_spin.get_value_as_int()
-
-        # Because the returned month is in 0-11 range
-        month += 1
-
-        date_time = datetime.datetime(year, month, day, hour, minute, second)
-        time_button.set_label(date_time.strftime('%B %d %Y %H:%M:%S'))
-
-        if target == 'start_time':
-            self.start_time = time.mktime(date_time.timetuple())
-        elif target == 'end_time':
-            self.end_time = time.mktime(date_time.timetuple())
-
-        self.time_popup.destroy()
-
-
-    def on_time_reset_clicked(self, reset_button, time_button, target):
-        time_button.set_label('Choose time...')
-        if target == 'start_time':
-            self.start_time = None
-        elif target == 'end_time':
-            self.end_time = None
-            
-        self.time_popup.destroy()
-
-
-    def on_search_window_focus_out(self, search_window, event):
-        if not self.time_picker_shown:
+        if target_button is None:
             return
-        self.time_popup.destroy()
 
-
-    def on_search_window_button_press(self, search_window, event):
-        if not self.time_picker_shown:
-            return
-        if event.type == gtk.gdk.BUTTON_PRESS:
-            self.time_popup.destroy()
+        target_button.set_label(button_text)
 
 
     def on_type_cb_toggled(self, type_cb):
@@ -1075,6 +1021,8 @@ class SearchResultsManager:
             self.next_button.set_sensitive(False)
         self.prev_button.connect('clicked', self.on_prev_button_clicked)
         self.next_button.connect('clicked', self.on_next_button_clicked)
+        self.close_button.connect('clicked', self.on_close_button_clicked)
+        self.results_window.connect('destroy', self.on_window_destroyed)
 
 
     def _populate_results(self, notifications_list):
@@ -1116,6 +1064,14 @@ class SearchResultsManager:
         self._populate_results(notifications_list)
 
 
+    def on_close_button_clicked(self, close_button):
+        self.results_window.destroy()
+
+
+    def on_window_destroyed(self, results_window):
+        self.ui_manager.shell.stop_search(self.search_id)
+        
+
     def on_prev_button_clicked(self, prev_button):
         prev_position =  max(0, self.position - self.page_size)
         self.ui_manager.shell.get_next_search_results(self.search_id,\
@@ -1139,7 +1095,147 @@ class SearchResultsManager:
 
 
 
+class TimePickerManager(gobject.GObject):
+    __gsignals__ = {
+        # Emitted when a target value is changed
+        # Parameters: target name, target value
+        "value-changed": (gobject.SIGNAL_RUN_FIRST,
+                          gobject.TYPE_NONE,
+                          (str, float)),
+        }
+
+    def __init__(self, targets, parent_window):
+        gobject.GObject.__init__(self)
+
+        # Mapping target names to their values
+        self.targets_dict = dict()
+        for target in targets:
+            self.targets_dict[target] = None
+
+        self.parent_window = parent_window
+
+        # The actual time picker widget
+        self.time_popup = None
+
+
+    def close(self):
+        if self.time_popup is not None:
+            self.time_popup.destroy()
+
+
+    def choose_value(self, target):
+        """ Called when we should show the time picker widget """
+        if target not in self.targets_dict.keys():
+            return
+
+        if self.time_popup is not None:
+            self.time_popup.destroy()
+
+        # Build the objects
+        builder = gtk.Builder()
+        builder.add_from_file(ni_time_date_picker_file)
+        self.time_popup = builder.get_object('time_date_popup')
+        self.date_calendar = builder.get_object('date_calendar')
+        self.hour_spin = builder.get_object('hour_spin')
+        self.minute_spin = builder.get_object('minute_spin')
+        self.second_spin = builder.get_object('second_spin')
+        set_button = builder.get_object('set_button')
+        reset_button = builder.get_object('reset_button')
+
+        self.time_popup.set_transient_for(self.parent_window)
+        self.time_popup.show()
+
+        # Set the position for the time-picker popup
+        parent_position = self.parent_window.get_position()
+        cursor_position = self.parent_window.get_pointer()
+        top_left_x = parent_position[0] + cursor_position[0]
+        top_left_y = parent_position[1] + cursor_position[1]
+        self.time_popup.move(top_left_x, top_left_y)
+
+        # Move it if near the bottom or right screen borders
+        screen = self.time_popup.get_screen()
+        screen_width = screen.get_width()
+        screen_height = screen.get_height()
+        
+        popup_width, popup_height = self.time_popup.get_size()
+        if top_left_x + popup_width > screen_width:
+            top_left_x = screen_width - popup_width
+            self.time_popup.move(top_left_x, top_left_y)
+        if top_left_y + popup_height > screen_height:
+            top_left_y = screen_height - popup_height
+            self.time_popup.move(top_left_x, top_left_y)
+
+        # Initialize the time
+        time_value = self.targets_dict[target]
+        if time_value is None:
+            crt_time = datetime.datetime.fromtimestamp(time.time())
+        else:
+            crt_time = datetime.datetime.fromtimestamp(time_value)
+        self.date_calendar.select_month(crt_time.month - 1, crt_time.year)
+        self.date_calendar.select_day(crt_time.day)
+        self.hour_spin.set_value(crt_time.hour)
+        self.minute_spin.set_value(crt_time.minute)
+        self.second_spin.set_value(crt_time.second)
+
+        # Connect the handlers
+        self.parent_window.connect('focus-out-event',\
+                                   self.on_parent_window_focus_out)
+        self.parent_window.connect('button-press-event',\
+                                   self.on_parent_window_button_press)
+        self.time_popup.connect('destroy', self.on_time_popup_destroyed)
+        set_button.connect('clicked', self.on_time_set_clicked, target)
+        reset_button.connect('clicked', self.on_time_reset_clicked, target)
+
+
+    def on_time_popup_destroyed(self, time_popup):
+        self.time_popup = None
+
+
+    def on_time_set_clicked(self, set_button, target):
+        # Get the time information
+        year, month, day = self.date_calendar.get_date()
+        hour = self.hour_spin.get_value_as_int()
+        minute = self.minute_spin.get_value_as_int()
+        second = self.second_spin.get_value_as_int()
+
+        # Because the returned month is in 0-11 range
+        month += 1
+
+        date_time = datetime.datetime(year, month, day, hour, minute, second)
+        
+        self.targets_dict[target] = time.mktime(date_time.timetuple())
+        self.emit('value-changed', target, self.targets_dict[target])
+
+        self.time_popup.destroy()
+
+
+    def on_time_reset_clicked(self, reset_button, target):
+        self.targets_dict[target] = None
+        self.emit('value-changed', target, -1.0)
+        self.time_popup.destroy()
+
+
+    def on_parent_window_focus_out(self, parent_window, event):
+        if self.time_popup is not None:
+            self.time_popup.destroy()
+
+
+    def on_parent_window_button_press(self, parent_window, event):
+        if self.time_popup is None:
+            return
+        if event.type == gtk.gdk.BUTTON_PRESS:
+            self.time_popup.destroy()
+
+
+
 class EventsViewWidget(gtk.TreeView):
+
+    # View Columns
+    TREE_VIEW_COL_HOST = 0
+    TREE_VIEW_COL_TYPE = 1
+    TREE_VIEW_COL_TIME = 2
+    TREE_VIEW_COL_PROT = 3
+    TREE_VIEW_COL_DESC = 4
 
     # Model columns
     TREE_MODEL_COL_HOST = 0
@@ -1151,16 +1247,26 @@ class EventsViewWidget(gtk.TreeView):
 
 
     def __init__(self, ui_manager, filter_function=None,\
-                 filter_func_user_data=None):
+                 filter_func_user_data=None, activated_view_cols = None):
         self.ui_manager = ui_manager
         self.filter_function = filter_function
         self.filter_function_user_data = filter_func_user_data
 
         gtk.TreeView.__init__(self)
-        
+
+        if activated_view_cols is None:
+            self.activated_view_cols = dict()
+            self.activated_view_cols[self.TREE_VIEW_COL_DESC] = True
+            self.activated_view_cols[self.TREE_VIEW_COL_PROT] = True
+            self.activated_view_cols[self.TREE_VIEW_COL_TYPE] = True
+            self.activated_view_cols[self.TREE_VIEW_COL_TIME] = True
+            self.activated_view_cols[self.TREE_VIEW_COL_HOST] = True
+        else:
+            self.activated_view_cols = activated_view_cols
+            
         self._init_model()
         self._init_columns()
-
+    
         self.connect('row-activated', self.on_row_activated)
 
 
@@ -1181,54 +1287,59 @@ class EventsViewWidget(gtk.TreeView):
     def _init_columns(self):
 
         # 1. Source Host Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Source Host', cell)
-        col.set_min_width(150)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_HOST)
-        self.append_column(col)
+        if self.activated_view_cols[self.TREE_VIEW_COL_HOST]:
+            cell = gtk.CellRendererText()
+            col = gtk.TreeViewColumn('Source Host', cell)
+            col.set_min_width(150)
+            col.set_alignment(0.5)
+            col.set_property('resizable', True)
+            col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                                   self.TREE_MODEL_COL_HOST)
+            self.append_column(col)
 
         # 2. Type Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Event Type', cell)
-        col.set_min_width(100)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_TYPE)
-        self.append_column(col)
+        if self.activated_view_cols[self.TREE_VIEW_COL_TYPE]:
+            cell = gtk.CellRendererText()
+            col = gtk.TreeViewColumn('Event Type', cell)
+            col.set_min_width(100)
+            col.set_alignment(0.5)
+            col.set_property('resizable', True)
+            col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                                   self.TREE_MODEL_COL_TYPE)
+            self.append_column(col)
 
         # 3. Time Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Time', cell)
-        col.set_min_width(140)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_TIME)
-        self.append_column(col)
+        if self.activated_view_cols[self.TREE_VIEW_COL_TIME]:
+            cell = gtk.CellRendererText()
+            col = gtk.TreeViewColumn('Time', cell)
+            col.set_min_width(140)
+            col.set_alignment(0.5)
+            col.set_property('resizable', True)
+            col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                                   self.TREE_MODEL_COL_TIME)
+            self.append_column(col)
 
         # 4. Protocol Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Protocol', cell)
-        col.set_min_width(110)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_PROT)
-        self.append_column(col)
+        if self.activated_view_cols[self.TREE_VIEW_COL_PROT]:
+            cell = gtk.CellRendererText()
+            col = gtk.TreeViewColumn('Protocol', cell)
+            col.set_min_width(110)
+            col.set_alignment(0.5)
+            col.set_property('resizable', True)
+            col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                                   self.TREE_MODEL_COL_PROT)
+            self.append_column(col)
 
         # 5. Short Description Column
-        cell = gtk.CellRendererText()
-        col = gtk.TreeViewColumn('Short Description', cell)
-        col.set_min_width(250)
-        col.set_alignment(0.5)
-        col.set_property('resizable', True)
-        col.set_cell_data_func(cell, self.tree_view_col_data_func,\
-                               self.TREE_MODEL_COL_DESC)
-        self.append_column(col)
+        if self.activated_view_cols[self.TREE_VIEW_COL_DESC]:
+            cell = gtk.CellRendererText()
+            col = gtk.TreeViewColumn('Short Description', cell)
+            col.set_min_width(250)
+            col.set_alignment(0.5)
+            col.set_property('resizable', True)
+            col.set_cell_data_func(cell, self.tree_view_col_data_func,\
+                                   self.TREE_MODEL_COL_DESC)
+            self.append_column(col)
 
         
     def tree_view_col_data_func(self, column, cell, model, iter, model_col):
@@ -1300,3 +1411,389 @@ class EventsViewWidget(gtk.TreeView):
 
     def clear(self):
         self.model.clear()
+
+
+
+class HostsViewManager:
+
+    MODEL_COL_HOSTINFO = 0
+    MODEL_COL_HOSTNAME = 1
+
+    def __init__(self, builder, ui_manager):
+        self.ui_manager = ui_manager
+        self.hosts = None
+        self.ips = None
+        self.initing_toggle_buttons_mode = False
+        self.active_widget = None
+
+        # Get the objects
+        self.hosts_view = builder.get_object('hosts_view_top')
+        self.hosts_tree_view = builder.get_object('hosts_tree_view')
+        self.buttons_container = builder.get_object('buttons_container')
+        self.widget_container = builder.get_object('widget_container')
+        
+        # Connect the handlers
+        self.hosts_tree_view.connect('row-activated',\
+                self.on_hosts_tree_view_row_activated)
+
+        # Init the hosts tree view
+        self._init_hosts_tree_view()
+
+        # Init the host views
+        self.host_details_views = dict()
+        self.active_host_detail_view = None
+        self.toggle_buttons = list()
+
+
+    def _init_hosts_tree_view(self):
+        self.hosts_model = gtk.ListStore(gobject.TYPE_STRING, gobject.TYPE_STRING)
+        self.hosts_tree_view.set_model(self.hosts_model)
+
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Hostname', cell)
+        col.set_alignment(0.5)
+        col.set_property('resizable', False)
+        col.add_attribute(cell, 'text', self.MODEL_COL_HOSTINFO)
+        self.hosts_tree_view.append_column(col)
+
+        self.hosts_tree_view.set_enable_search(True)
+        self.hosts_tree_view.set_search_column(0)
+
+
+    def add_host_detail_view(self, detail_host_view):
+        if not isinstance(detail_host_view, AbstractHostsView):
+            return
+
+        name = detail_host_view.get_name()
+        self.host_details_views[name] = detail_host_view
+
+        # Initialize the associated toggle button
+        toggle_button = gtk.ToggleButton(name)
+        toggle_button.set_property('width-request', 100)
+        self.toggle_buttons.append(toggle_button)
+        self.buttons_container.pack_start(toggle_button, False, False, 6)
+        toggle_button.connect('toggled',\
+                self.on_host_detail_view_button_toggled)
+        toggle_button.show()
+
+        # Activating the first added button
+        if len(self.toggle_buttons) == 1:
+            self.initing_toggle_buttons_mode = True
+            toggle_button.set_active(True)
+            self.active_host_detail_view = name
+        
+
+    def set_hosts(self, hosts):
+        self.hosts = hosts
+        if self.ips is not None:
+            self._set_hosts_info()
+            
+
+    def set_ips(self, ips):
+        self.ips = ips
+        if self.hosts is not None:
+            self._set_hosts_info()
+
+
+    def _set_hosts_info(self):
+        for i in range(0, len(self.hosts)):
+            iter = self.hosts_model.append()
+            hostinfo = str(self.hosts[i])
+            if self.ips[i] is not '':
+                hostinfo += ' (%s) ' % self.ips[i]
+            self.hosts_model.set(iter,
+                                 self.MODEL_COL_HOSTINFO, hostinfo,\
+                                 self.MODEL_COL_HOSTNAME, str(self.hosts[i]))
+
+
+    def on_hosts_tree_view_row_activated(self, treeview, path, view_column):
+        model = treeview.get_model()
+        iter = model.get_iter(path)
+
+        hostname = model.get_value(iter, self.MODEL_COL_HOSTNAME)
+        host_view = self.host_details_views[self.active_host_detail_view]
+        host_view.set_host(hostname)
+
+        if self.active_widget is None:
+            self.active_widget = host_view.get_widget()
+            self.widget_container.add(self.active_widget)
+
+
+    def on_host_detail_view_button_toggled(self, view_button):
+        if self.initing_toggle_buttons_mode:
+            self.initing_toggle_buttons_mode = False
+            return
+
+        active = view_button.get_active()
+        button_text = view_button.get_label()
+
+        # We don't allow disabling the toggle button
+        if not active and button_text == self.active_host_detail_view:
+            view_button.set_active(True)
+            return
+
+        if active and button_text != self.active_host_detail_view:
+            self.active_host_detail_view = button_text
+            for toggle_button in self.toggle_buttons:
+                if toggle_button == view_button:
+                    continue
+                toggle_button.set_active(False)
+
+            self.widget_container.remove(self.active_widget)
+            if self.active_widget is not None:
+                self.active_widget.hide()
+                self.active_widget.unparent()
+            self.active_widget = self.host_details_views[button_text].get_name()
+            self.widget_container.add(self.active_widget)
+            
+
+
+class AbstractHostsView:
+    """
+    Base class used to show a view for a host in the networks hosts tab.
+    """
+
+    def get_widget(self):
+        """ Returns the actual widget which will be used to show host info. """
+        pass
+
+
+    def get_name(self):
+        """
+        Returns the name of the host view. This will be used for the toggle
+        button label.
+        """
+        pass
+
+
+    def set_host(self, hostname):
+        """
+        Called by the HostsManager when a host is selected and the view
+        must set it's details according to the selected host. Called with
+        None when the widget is focused out.
+        """
+        pass
+
+
+
+class ReportsHostsView(AbstractHostsView):
+
+    MODEL_COL_TIME = 0
+    MODEL_COL_DESCRIPTION = 1
+    
+    def __init__(self, ui_manager):
+        self.ui_manager = ui_manager
+        self.model = None
+        self.hostname = None
+        self.search_id = None
+        self.start_time = None
+        self.end_time = None
+
+        self.time_picker_manager = TimePickerManager(\
+                ['start_time', 'end_time'], ui_manager.main_window)
+
+        # Get the objects
+        builder = gtk.Builder()
+        builder.add_from_file(ni_reports_hosts_view)
+        self.reports_view = builder.get_object('reports_hosts_view_top')
+        self.reports_view.unparent()
+        self.prev_button = builder.get_object('prev_button')
+        self.prev_button.set_sensitive(False)
+        self.next_button = builder.get_object('next_button')
+        self.next_button.set_sensitive(False)
+        self.start_time_button = builder.get_object('start_time_button')
+        self.end_time_button = builder.get_object('end_time_button')
+        self.filter_button = builder.get_object('filter_button')
+        self.reports_tree_view = builder.get_object('reports_tree_view')
+        self.report_text_view = builder.get_object('report_text_view')
+
+        self._init_reports_tree_view()
+        self._init_handlers()
+
+
+    def _init_reports_tree_view(self):
+        self.model = gtk.ListStore(gobject.TYPE_STRING, gobject.TYPE_STRING)
+        self.reports_tree_view.set_model(self.model)
+
+        # Add the column (only one column: the time the report was generated)
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Report Time', cell)
+        col.set_min_width(200)
+        col.set_alignment(0.5)
+        col.set_property('resizable', False)
+        col.add_attribute(cell, 'text', self.MODEL_COL_TIME)
+        self.reports_tree_view.append_column(col)
+
+
+    def _init_handlers(self):
+        self.prev_button.connect('clicked', self.on_prev_button_clicked)
+        self.next_button.connect('clicked', self.on_next_button_clicked)
+        self.filter_button.connect('clicked', self.on_filter_button_clicked)
+        self.reports_tree_view.connect('row-activated',\
+                self.on_reports_tree_view_row_activated)
+        self.start_time_button.connect('clicked',\
+                self.on_time_button_clicked, 'start_time')
+        self.end_time_button.connect('clicked',\
+                self.on_time_button_clicked, 'end_time')
+        self.time_picker_manager.connect('value-changed', self.on_time_changed)
+
+
+    def _populate_results(self, notifications_list):
+        self.model.clear()
+
+        # Clear the description text view
+        buffer = self.report_text_view.get_buffer()
+        buffer.set_text('')
+        
+        for notification in notifications_list:
+            timestamp = notification['timestamp']
+            description = notification['description']
+            iter = self.model.append()
+            self.model.set(iter,\
+                           self.MODEL_COL_TIME, time.ctime(timestamp),\
+                           self.MODEL_COL_DESCRIPTION, description)
+
+
+    def reports_tree_view_col_data_func(self, column, cell, model, iter, model_col):
+        col_value = model.get_value(iter, model_col)
+        cell.set_property('text', time.ctime(col_value))
+
+
+    def on_time_button_clicked(self, time_button, target):
+        self.time_picker_manager.choose_value(target)
+
+
+    def on_time_changed(self, time_manager, target, target_value):
+        if target_value == -1.0:
+            button_text = 'Choose Time ...'
+        else:
+            date_time = datetime.datetime.fromtimestamp(target_value)
+            button_text = date_time.strftime('%B %d %Y %H:%M:%S')
+
+        target_button = None
+        if target == 'start_time':
+            target_button = self.start_time_button
+            self.start_time = target_value if target_value != -1.0 else None
+        elif target == 'end_time':
+            target_button = self.end_time_button
+            self.end_time = target_value if target_value != -1.0 else None
+
+        if target_button is None:
+            return
+
+        target_button.set_label(button_text)
+
+
+    def on_reports_tree_view_row_activated(self, treeview, path, view_column):
+        model = treeview.get_model()
+        iter = model.get_iter(path)
+
+        description = model.get_value(iter, self.MODEL_COL_DESCRIPTION)
+        buffer = self.report_text_view.get_buffer()
+        buffer.set_text(description)
+
+
+    def on_prev_button_clicked(self, prev_button):
+        self.expected_position = self.position - self.current_page_len
+        self.ui_manager.shell.get_next_search_results(self.search_id,\
+                self.expected_position, self.search_next_callback_function)
+        self.prev_button.set_sensitive(False)
+        self.next_button.set_sensitive(False)
+
+
+    def on_next_button_clicked(self, next_button):
+        self.expected_position = self.position + self.current_page_len
+        self.ui_manager.shell.get_next_search_results(self.search_id,\
+                self.expected_position, self.search_next_callback_function)
+        self.prev_button.set_sensitive(False)
+        self.next_button.set_sensitive(False)
+
+
+    def on_filter_button_clicked(self, filter_button):
+        self.set_host(self.hostname)
+
+
+    def get_name(self):
+        return 'Reports'
+
+
+    def get_widget(self):
+        return self.reports_view
+
+
+    def set_host(self, hostname):
+        # Query the Server database for reports for this host
+        self.hostname = hostname
+        self.model.clear()
+
+        # Clear the description text view
+        buffer = self.report_text_view.get_buffer()
+        buffer.set_text('')
+
+        # If we have an active search, stop it
+        if self.search_id is not None:
+            self.ui_manager.shell.stop_search(self.search_id)
+            self.search_id = None
+
+        # If we shouldn't show any data
+        if hostname is None:
+            return
+
+        # Only interested in the description and timestamp fields
+        fields = ['description', 'timestamp']
+
+        # Sorting descending by timestamp
+        sort = [('timestamp', False)]
+
+        # Conditions to show the events
+        spec = dict()
+        spec['hostname'] = {'$in' : [hostname.strip()]}
+        spec['is_report'] = {'$ne' : False}
+
+        if self.start_time or self.end_time:
+            spec['timestamp'] = dict()
+        if self.start_time:
+            spec['timestamp']['$gt'] = self.start_time
+        if self.end_time:
+            spec['timestamp']['$lt'] = self.end_time
+
+        self.ui_manager.shell.search_notifications(spec, sort, fields,\
+                self.search_callback_function)
+
+
+    def search_callback_function(self, notifications_list=None,\
+            search_id=None, count=0, position=0, failed=False):
+        if failed:
+            self.ui_manager.show_run_state_error("", "Report fetching failed")
+            return
+        self.search_id = search_id
+        self.current_page_len = len(notifications_list)
+        self.count = count
+        self.position = 0
+
+        # If we don't have any more reports
+        if self.current_page_len < count:
+            self.next_button.set_sensitive(True)
+
+        self._populate_results(notifications_list)
+
+
+    def search_next_callback_function(self, notifications_list=None,\
+            search_id=None, count=0, position=0, failed=False):
+        if failed:
+            self.ui_manager.show_run_state_error("", "Report fetching failed")
+            return
+
+        self.current_report_len = len(notifications_list)
+        self.position = self.expected_position
+        if self.position + self.current_report_len < self.count:
+            self.next_button.set_sensitive(True)
+        else:
+            self.next_button.set_sensitive(False)
+        if self.position > 0:
+            self.prev_button.set_sensitive(True)
+        else:
+            self.prev_button.set_sensitive(False)
+
+        self._populate_results(notifications_list)
+        

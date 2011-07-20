@@ -374,32 +374,31 @@ class ServerInterface:
         username = request.get_username()
         req_id = request.get_request_id()
 
-        print '1'
         general_request = GeneralRequest(request)
         if not general_request.sanity_check():
             response = self.build_invalid_response(req_id)
             connection.send_message(json.dumps(response), True)
             return
-        print '2'
+
         search_request = SearchNextGeneralRequest(general_request)
         if not search_request.sanity_check():
             response = self.build_invalid_response(req_id)
             connection.send_message(json.dumps(response), True)
             return
-        print '3'
+
         search_id = search_request.get_search_id()
         search_context = SearchContext.get_context(username, search_id)
         if search_context is None:
             response = self.build_invalid_response(req_id)
             connection.send_message(json.dumps(response), True)
             return
-        print '4'
+
         results = search_context.search_next(search_request.get_start_index())
         if results is None:
             response = self.build_invalid_response(req_id)
             connection.send_message(json.dumps(response), True)
             return
-        print '5'
+
         count = search_context.get_count()
         search_id = search_context.get_id()
         search_body = dict()
@@ -743,10 +742,24 @@ class SearchContext:
         results = []
         for index in range(start_index, end_index):
             result = self.cursor[index]
-            notification = Notification(result)
-            results.append(notification.fields)
+            # Clean the fields that are not JSON seriazable
+            results.append(self.clean_db_result(result))
 
         return results
+
+
+    @staticmethod
+    def clean_db_result(db_result):
+        """ Cleans the DB result so it's JSON seriazable """
+        new_fields = dict()
+        for field_key in db_result.keys():
+            try:
+                json.dumps(db_result[field_key])
+                json.dumps(field_key)
+                new_fields[field_key] = db_result[field_key]
+            except:
+                continue
+        return new_fields
 
 
     def search_stop(self):

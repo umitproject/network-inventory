@@ -55,5 +55,5 @@ class NIShell:
     def stop_search(self, search_id):
         search_request = SearchStopRequest(self.username, self.password,
                                            search_id)
-        self.communicator.sent_request(search_request)
+        self.communicator.send_request(search_request)
 
