@@ -26,6 +26,8 @@ from umit.inventory.gui.EventsViewManager import EventsViewManager
 from umit.inventory.gui.HostsViewManager import HostsViewManager
 from umit.inventory.gui.EventWindowManager import EventWindowManager
 from umit.inventory.gui.ReportsHostsView import ReportsHostsView
+from umit.inventory.gui.SearchWindowManager import SearchWindowManager
+from umit.inventory.gui.HostSelectManager import HostSelectManager
 
 
 # TODO needs refactoring
@@ -42,6 +44,7 @@ ni_search_results_window = os.path.join(glade_files_path,\
 ni_hosts_view_file = os.path.join(glade_files_path, 'ni_hosts_view.glade')
 ni_reports_hosts_view = os.path.join(glade_files_path,\
                                      'ni_reports_hosts_view.glade')
+ni_host_select_file = os.path.join(glade_files_path, 'ni_host_select.glade')
 
 
 class NIUIManager(gobject.GObject):
@@ -84,8 +87,10 @@ class NIUIManager(gobject.GObject):
         'time_picker' : ni_time_date_picker_file,\
         'search_results' : ni_search_results_window,\
         'hosts_view' : ni_hosts_view_file,\
-        'reports_hosts' : ni_reports_hosts_view\
+        'reports_hosts' : ni_reports_hosts_view,\
+        'host_select' : ni_host_select_file,\
     }
+
 
     def __init__(self, core, conf):
         gobject.GObject.__init__(self)
@@ -93,6 +98,10 @@ class NIUIManager(gobject.GObject):
         self.conf = conf
 
         self.logged_in = False
+
+        self.hosts = None
+        self.ips = None
+        self.protocols = None
         
         # Basic widgets initialization
         self.main_window = None
@@ -104,6 +113,8 @@ class NIUIManager(gobject.GObject):
         self.init_events_view()
         self.init_hosts_view()
         self.init_event_window()
+
+        self.search_window_manager = SearchWindowManager(self)
 
 
     def init_main_window(self):
@@ -261,10 +272,40 @@ class NIUIManager(gobject.GObject):
                                      gtk.Label('Network Hosts'), 1)
         self.hosts_view_manager.add_host_detail_view(ReportsHostsView(self))
 
+        # Init the host select
+        self.host_select_manager = HostSelectManager(self)
+        
+
 
     def init_event_window(self):
         self.event_window_manager =\
                 EventWindowManager(ni_event_window_file, self)
+
+
+    def init_toolbar(self):
+        # Add the configuration button
+        # TODO: Test permissions
+        self.config_button = gtk.ToolButton(gtk.STOCK_PREFERENCES)
+        self.config_button.connect('clicked', self.on_config_clicked)
+        self.config_button.set_label('Settings')
+        self.ni_toolbar.insert(self.config_button, -1)
+        self.config_button.show()
+        self.config_button.set_sensitive(False)
+
+        # Add the search events button
+        self.search_button = gtk.ToolButton(gtk.STOCK_FIND)
+        self.search_button.connect('clicked', self.on_search_events_clicked)
+        self.search_button.set_label('Find Events')
+        self.ni_toolbar.insert(self.search_button, -1)
+        self.search_button.show()
+
+        # Add the host info button
+        self.host_info_button = gtk.ToolButton(gtk.STOCK_NETWORK)
+        self.host_info_button.connect('clicked', self.on_host_info_clicked)
+        self.host_info_button.set_label('Host Info')
+        self.ni_toolbar.insert(self.host_info_button, -1)
+        self.host_info_button.show()
+        self.host_info_button.set_sensitive(False)
 
 
     def event_show_request(self, notification, parent_window):
@@ -284,7 +325,8 @@ class NIUIManager(gobject.GObject):
         """ Application running in full mode (after login) """
         self.logged_in = True
         self.auth_window.destroy()
-        
+
+        self.init_toolbar()
         self.main_window.show()
 
 
@@ -295,19 +337,33 @@ class NIUIManager(gobject.GObject):
 
     def set_protocols(self, protocols):
         """ Sets the protocols that will be shown in the GUI """
+        self.protocols = protocols
         self.events_view_manager.set_protocols(protocols)
+        self.search_window_manager.set_protocols(protocols)
 
 
     def set_hostnames(self, hostnames):
         """ Sets the hostnames that will be shown in the GUI """
+        self.hosts = hostnames
         self.events_view_manager.set_hosts(hostnames)
         self.hosts_view_manager.set_hosts(hostnames)
+        self.search_window_manager.set_hosts(hostnames)
+
+        # Make the host select button sensitive
+        self.host_info_button.set_sensitive(True)
 
 
     def set_ips(self, ips):
         """ Sets the IP addresses that will be shown in the GUI """
+        self.ips = ips
         self.events_view_manager.set_ips(ips)
         self.hosts_view_manager.set_ips(ips)
+        self.search_window_manager.set_ips(ips)
+
+
+    def search_events(self):
+        if not self.search_window_manager.window_is_shown():
+            self.search_window_manager.show_window(self.main_window)
 
 
     # Login state handlers
@@ -333,3 +389,17 @@ class NIUIManager(gobject.GObject):
 
     def on_main_window_destroyed(self, main_window):
         self.emit('shutdown')
+
+
+    # Run state handlers
+
+    def on_config_clicked(self, config_button):
+        pass
+
+
+    def on_search_events_clicked(self, search_button):
+        self.search_events()
+
+
+    def on_host_info_clicked(self, host_info_button):
+        self.host_select_manager.show(self.main_window, self.hosts)
