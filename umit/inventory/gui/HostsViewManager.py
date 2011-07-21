@@ -38,6 +38,7 @@ class HostsViewManager:
         self.hosts_tree_view = builder.get_object('hosts_tree_view')
         self.buttons_container = builder.get_object('buttons_container')
         self.widget_container = builder.get_object('widget_container')
+        self.host_label = builder.get_object('host_label')
         
         # Connect the handlers
         self.hosts_tree_view.connect('row-activated',\
@@ -88,7 +89,34 @@ class HostsViewManager:
             self.initing_toggle_buttons_mode = True
             toggle_button.set_active(True)
             self.active_host_detail_view = name
-        
+
+
+    def select_host(self, hostname):
+        """
+        Selects a host from the tree view and activates it's row.
+        Returns True if hostname exists in the tree view's model.
+        """
+        # Locate the host
+        first_iter = self.hosts_model.get_iter_root()
+        if first_iter is None:
+            return False
+
+        iter = first_iter
+        while iter is not None:
+            current_hostname = self.hosts_model.get_value(iter,\
+                    self.MODEL_COL_HOSTNAME)
+
+            # Found the host
+            if hostname == current_hostname:
+                path = self.hosts_model.get_path(iter)
+                col = self.hosts_tree_view.get_column(0)
+                self.hosts_tree_view.row_activated(path, col)
+                return True
+
+            iter = self.hosts_model.iter_next(iter)
+
+        return False
+
 
     def set_hosts(self, hosts):
         self.hosts = hosts
@@ -120,8 +148,15 @@ class HostsViewManager:
         hostname = model.get_value(iter, self.MODEL_COL_HOSTNAME)
         host_view = self.host_details_views[self.active_host_detail_view]
         host_view.set_host(hostname)
+        self.host_label.set_markup('<b>%s detail options:</b>' % hostname)
 
         if self.active_widget is None:
+            # Clean the children (should be the initial label)
+            children = self.widget_container.get_children()
+            for child in children:
+                self.widget_container.remove(child)
+
+            # Add the new widget
             self.active_widget = host_view.get_widget()
             self.widget_container.add(self.active_widget)
 

@@ -69,9 +69,6 @@ class EventsViewManager(gobject.GObject):
                        NotificationTypes.critical : self.critical_cb,\
                        NotificationTypes.unknown : self.unknown_cb}
 
-        # Used for the window that is shown when the Find button is pressed
-        self.search_window_manager = SearchWindowManager(self.ui_manager)
-
         # The widget where the events will be shown
         self.events_widget = EventsViewWidget(self.ui_manager,\
                 self.tree_model_visible_func, self)
@@ -121,8 +118,6 @@ class EventsViewManager(gobject.GObject):
         self.protocols_shown_cbox.set_active(0)
         self.protocols_shown_cbox.set_model(self.protocols_model)
 
-        self.search_window_manager.set_protocols(protocols)
-
 
     def set_hosts(self, hosts):
         self.hosts_model = gtk.ListStore(gobject.TYPE_STRING)
@@ -134,11 +129,9 @@ class EventsViewManager(gobject.GObject):
             self.hosts_model.set(iter, 0, host)
         self.source_host_cbox.set_model(self.hosts_model)
 
-        self.search_window_manager.set_hosts(hosts)
-
 
     def set_ips(self, ips):
-        self.search_window_manager.set_ips(ips)
+        pass
 
 
     @staticmethod
@@ -192,8 +185,7 @@ class EventsViewManager(gobject.GObject):
 
 
     def on_find_events_button_clicked(self, find_events_button):
-        if not self.search_window_manager.window_is_shown():
-            self.search_window_manager.show_window(self.ui_manager.main_window)
+        self.ui_manager.search_events()
 
 
     def on_receive_events_button_toggled(self, receive_events_button):

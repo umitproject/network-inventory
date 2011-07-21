@@ -55,6 +55,8 @@ class EventWindowManager:
         self.module_specific_container =\
             builder.get_object('module_specific_container')
 
+        self.description_text_view.set_wrap_mode(gtk.WRAP_WORD)
+
 
     def show_event(self, event, parent_window):
         """
