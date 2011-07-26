@@ -46,6 +46,8 @@ class NetworkAdministratorSender(ServerModule, SubscriberServerModule):
         self.max_qsize = int(self.options[NetworkAdministratorSender.queue_size])
         self.wait_time = float(self.options[NetworkAdministratorSender.wait_time])
 
+
+    def activate(self):
         self.dispatcher = NotificationQueueDispatcher(self.host, self.username,\
                 self.password, self.max_qsize, self.wait_time)
         self.dispatcher.start()

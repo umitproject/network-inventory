@@ -20,6 +20,8 @@ from OpenSSL import crypto
 
 from umit.inventory.server.Module import ListenerServerModule
 from umit.inventory.server.Module import ServerModule
+from umit.inventory.server.ServerInterface import ServerInterface
+from umit.inventory.server.ServerInterfaceMessages import ResponseFields
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 from umit.inventory.common import AgentFields
@@ -27,13 +29,13 @@ from umit.inventory.common import message_delimiter
 from umit.inventory.common import AgentMessageTypes
 from umit.inventory.common import NotificationTypes
 from umit.inventory.common import keep_alive_timeout
+from umit.inventory.common import AgentCommandFields
 from umit.inventory.server.Host import Host
 
 from twisted.internet import reactor
 from twisted.internet.protocol import DatagramProtocol
-from twisted.internet import ssl
+import twisted.internet.ssl
 from twisted.internet.protocol import Factory
-from twisted.internet.protocol import Protocol
 from twisted.protocols.basic import LineReceiver
 from twisted.internet.address import IPv4Address
 
@@ -47,6 +49,7 @@ import os
 import hashlib
 from threading import Thread
 from threading import Lock
+import ssl
 
 
 class AgentListener(ListenerServerModule, ServerModule):
@@ -80,6 +83,23 @@ class AgentListener(ListenerServerModule, ServerModule):
         self.ssl_auth = bool(self.options[AgentListener.ssl_auth_enabled])
         self.udp_auth = bool(self.options[AgentListener.udp_auth_enabled])
 
+        self.agent_tracker = None
+        self.command_tracker = None
+        
+        # Mapping request types to their handlers
+        self.request_handlers = {\
+            AgentRequestTypes.add_user : self.evaluate_add_user_request,\
+            AgentRequestTypes.del_user : self.evaluate_del_user_request,\
+            AgentRequestTypes.get_users : self.evaluate_get_users_request,\
+            AgentRequestTypes.get_configs : self.evaluate_get_configs_request,\
+            AgentRequestTypes.set_configs : self.evaluate_set_configs_request,\
+            AgentRequestTypes.restart : self.evaluate_restart_request,\
+            }
+
+        Notification.register_class(AgentNotification)
+
+
+    def activate(self):
         # Generate the SSL key and certificate
         logging.info('AgentListener: Loading SSL support ...')
         self.ssl_enabled = True
@@ -91,7 +111,6 @@ class AgentListener(ListenerServerModule, ServerModule):
             self.ssl_enabled = False
         logging.info('AgentListener: Loaded SSL support')
 
-        self.agent_tracker = None
         # The users used for authentication if enabled
         self.users = {}
 
@@ -99,7 +118,8 @@ class AgentListener(ListenerServerModule, ServerModule):
         # None, then the host is down
         self.hosts_command_port = {}
 
-        Notification.register_class(AgentNotification)
+        # Mapping GET_CONFIG requests to their data_connection
+        self.get_configs_map = dict()
 
 
     def _generate_ssl_files(self):
@@ -151,15 +171,28 @@ class AgentListener(ListenerServerModule, ServerModule):
         # Get the list of hosts from the database
         hosts_list = self.shell.database.get_hosts()
         self.agent_tracker = AgentTracker(self.shell, hosts_list)
+        self.command_tracker = AgentCommandTracker(self.agent_tracker)
         self.agent_tracker.start()
 
         # TODO: delete this after testing is done:
-        if 'guest' not in self.users.keys():
-            guest_pass = hashlib.md5('guest').hexdigest()
-            self.users['guest'] = guest_pass
-            self.shell.database.insert(AgentListener.collection_name,\
-                {'username' : 'guest', 'md5_pass' : guest_pass})
+        self.add_user('guest', 'guest')
 
+
+    def add_user(self, username, password):
+        if username not in self.users.keys():
+            user_pass = hashlib.md5(password).hexdigest()
+            self.users[username] = user_pass
+            self.shell.database.insert(AgentListener.collection_name,\
+                {'username' : username, 'md5_pass' : user_pass})
+
+
+    def del_user(self, username):
+        if username not in self.users.keys():
+            return
+        del self.users[username]
+        self.shell.database.remove(AgentListener.collection_name,\
+            {'username' : username})
+            
 
     def init_default_settings(self):
         self.options[AgentListener.udp_port_option] = '20000'
@@ -288,6 +321,192 @@ class AgentListener(ListenerServerModule, ServerModule):
         return True
 
 
+    def evaluate_request(self, request, data_connection):
+        req_id = request.get_request_id()
+    
+        agent_request = AgentRequest(request)
+
+        if not agent_request.sanity_check():
+            response = ServerInterface.build_invalid_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        request_type = agent_request.get_type()
+        try:
+            self.request_handlers[request_type](agent_request, req_id,\
+                                                data_connection)
+        except:
+            logging.warning('AgentListener: Invalid request type', exc_info=True)
+
+
+    def evaluate_set_configs_request(self, agent_request, req_id,\
+                                     data_connection):
+        # Check the format is correct
+        set_configs_request = AgentSetConfigsRequest(agent_request)
+        if not set_configs_request.sanity_check():
+            response = ServerInterface.build_invalid_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        # Make sure the agent tracker is up
+        hostname = set_configs_request.get_hostname()
+        if self.agent_tracker is None or self.command_tracker is None:
+            response = ServerInterface.build_internal_error_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        # Check the host is tracked
+        if not self.agent_tracker.have_host(hostname):
+            response = ServerInterface.build_invalid_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        # Try sending the command
+        configs = set_configs_request.get_configs()
+        
+        command_sent = self.command_tracker.send_command(hostname,\
+                'GENERAL', 'SET_CONFIGS', command_body=configs)
+        if not command_sent:
+            response = ServerInterface.build_internal_error_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+        else:
+            response = ServerInterface.build_accepted_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+
+
+    def evaluate_get_configs_request(self, agent_request, req_id,\
+                                     data_connection):
+        get_configs_request = AgentGetConfigsRequest(agent_request)
+        # Check the format is correct
+        if not get_configs_request.sanity_check():
+            response = ServerInterface.build_invalid_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        # Make sure the agent tracker is up
+        hostname = get_configs_request.get_hostname()
+        if self.agent_tracker is None or self.command_tracker is None:
+            response = ServerInterface.build_internal_error_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        # Check the host is tracked
+        if not self.agent_tracker.have_host(hostname):
+            response = ServerInterface.build_invalid_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        command_id = self.command_tracker.send_command(hostname,\
+                'GENERAL', 'GET_CONFIGS',\
+                handler_function=self.get_configs_handler,\
+                handler_user_data=req_id)
+
+        # If we failed sending the command
+        if command_id is -1:
+            response = ServerInterface.build_internal_error_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+        else:
+            self.get_configs_map[command_id] = data_connection
+
+        # If we get here, we are waiting for an response from the agent
+
+
+    def evaluate_restart_request(self, agent_request, req_id, data_connection):
+        # Check the format is correct
+        restart_request = AgentRestartRequest(agent_request)
+        if not restart_request.sanity_check():
+            response = ServerInterface.build_invalid_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        # Make sure the agent tracker is up
+        hostname = restart_request.get_hostname()
+        if self.agent_tracker is None or self.command_tracker is None:
+            response = ServerInterface.build_internal_error_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        # Check the host is tracked
+        if not self.agent_tracker.have_host(hostname):
+            response = ServerInterface.build_invalid_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        # Try sending the command
+        command_id = self.command_tracker.send_command(hostname,\
+                'GENERAL', 'RESTART')
+        if command_id is -1:
+            response = ServerInterface.build_internal_error_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+        else:
+            response = ServerInterface.build_accepted_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+
+
+    def evaluate_add_user_request(self, agent_request, req_id, data_connection):
+        add_user_request = AgentAddUserRequest(agent_request)
+        if not add_user_request.sanity_check():
+            response = ServerInterface.build_invalid_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        username = add_user_request.get_username()
+        password = add_user_request.get_password()
+        self.del_user(username)
+        response = ServerInterface.build_accepted_response(req_id)
+        data_connection.send_message(json.dumps(response), True)
+
+
+    def evaluate_del_user_request(self, agent_request, req_id, data_connection):
+        del_user_request = AgentDelUserRequest(agent_request)
+        if not del_user_request.sanity_check():
+            response = ServerInterface.build_invalid_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        username = del_user_request.get_username()
+        self.del_user(username)
+        response = ServerInterface.build_accepted_response(req_id)
+        data_connection.send_message(json.dumps(response), True)
+
+
+    def evaluate_get_users_request(self, agent_request, req_id, data_connection):
+        usernames = self.users.keys()
+
+        response = ServerInterface.build_accepted_response(req_id)
+        body = dict()
+        body[AgentGetUsersResponseBody.usernames] = usernames
+        response[ResponseFields.body] = body
+        data_connection.send_message(json.dumps(response), True)
+
+
+    def get_configs_handler(self, message, command_id, user_data, closed=False):
+        req_id = user_data
+        data_connection = self.get_configs_map[command_id]
+
+        if closed:
+            err_msg = 'AgentListener: Failed GET_CONFIGS from agent.\n'
+            err_msg += 'Connection closed by agent.'
+            logging.warning(err_msg)
+            response = ServerInterface.build_internal_error_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        if command_id not in self.get_configs_map.keys():
+            err_msg = 'AgentListener: GET_CONFIGS agent request with invalid id'
+            logging.warning(err_msg)
+            response = ServerInterface.build_internal_error_response(req_id)
+            data_connection.send_message(json.dumps(response), True)
+            return
+
+        configs = message
+        response = ServerInterface.build_accepted_response(req_id)
+        body = dict()
+        body[AgentGetConfigsResponseBody.configs] = configs
+        response[ResponseFields.body] = body
+        data_connection.send_message(json.dumps(response), True)
+
+
     def listen(self):
         # Listen on UDP port
         logging.info('AgentListener: Trying to listen UDP on port %s',\
@@ -308,7 +527,7 @@ class AgentListener(ListenerServerModule, ServerModule):
         ssl_factory = Factory()
         AgentSSLProtocol.agent_listener = self
         ssl_factory.protocol = AgentSSLProtocol
-        ssl_context_factory = ssl.DefaultOpenSSLContextFactory(\
+        ssl_context_factory = twisted.internet.ssl.DefaultOpenSSLContextFactory(\
             self.key_file_name, self.cert_file_name)
         logging.info('AgentListener: Trying to listen SSL on port %s',\
                      str(self.ssl_port))
@@ -422,6 +641,64 @@ class AgentTracker(Thread):
         self.received_messages_lock.release()
 
 
+    def have_host(self, hostname):
+        """ Returns True if the hostname is tracked, False otherwise """
+        return hostname in self.agents_info.keys()
+
+
+    def get_username(self, hostname):
+        """ Returns the username used by an agent, or None if none is used """
+        try:
+            return self.agents_info[hostname].username
+        except:
+            return None
+
+
+    def get_password(self, hostname):
+        """ Returns the password used by an agent, or None if none is used """
+        try:
+            return self.agents_info[hostname].password
+        except:
+            return None
+
+
+    def get_host_ipv4(self, hostname):
+        """ Returns the IPv4 address of a host, or None if no such host """
+        try:
+            return self.agents_info[hostname].host.ipv4_addr
+        except:
+            return None
+
+
+    def get_host_ipv6(self, hostname):
+        """ Returns the IPv6 address of a host, or None if no such host """
+        try:
+            return self.agents_info[hostname].host.ipv6_addr
+        except:
+            return None
+
+
+    def get_command_id(self, hostname):
+        """
+        Returns a new command id to be used for a command to the agent or None
+        if the hostname isn't registered.
+        """
+        try:
+            return self.agents_info[hostname].get_command_id()
+        except:
+            return None
+
+
+    def get_command_port(self, hostname):
+        """
+        Returns the command port for an agent on a host or -1 if no such port.
+        """
+        try:
+            return self.agents_info[hostname].command_port
+        except:
+            return -1
+
+
     def _handle_messages(self):
         self.received_messages_lock.acquire()
         current_messages = self.received_messages
@@ -469,6 +746,14 @@ class AgentTracker(Thread):
             self.shell.raise_notification(description, short_description,\
                     notif_type, False, ipv4_addr, ipv6_addr, hostname)
 
+        # Update the authentication data
+        try:
+            username = message[AgentFields.username]
+            password = message[AgentFields.password]
+            self.agents_info[hostname].set_auth_info(username, password)
+        except:
+            self.agents_info[hostname].set_auth_info(None, None)
+            
 
     def _raise_recovery_notification(self, hostname, timestamp,\
                                      ipv4_addr, ipv6_addr):
@@ -539,7 +824,506 @@ class AgentInformation:
         self.host = host
         self.command_port = command_port
         self.last_keep_alive = last_keep_alive
+        self.last_command_id = 0
+
+        self.username = None
+        self.password = None
+
+
+    def set_auth_info(self, username, password):
+        self.username = username
+        self.password = password
 
 
     def update_keep_alive(self):
         self.last_keep_alive = time.time()
+
+
+    def get_command_id(self):
+        self.last_command_id += 1
+        return self.last_command_id
+
+
+
+class AgentCommandTracker:
+
+    def __init__(self, agent_tracker):
+        self.agent_tracker = agent_tracker
+
+
+    def send_command(self, hostname, target, command_name,\
+                     command_body=dict(), handler_function=None,\
+                     handler_user_data=None):
+        """
+        Send a command to an agent:
+        target: The target of the command.
+        command_name: The name of the command.
+        command_body: The body of the command (if present)
+        hostname: The hostname on which the agent is present.
+        handler_function: function to be called when a response is received. It
+        should have the definition handler_function(message, command_id,\
+        handler_user_data, closed=False) and it should return True if more
+        responses are accepted, False otherwise.
+
+        Returns a positive integer representing the command id, or -1 on failure.
+        """
+        # Get the host information
+        ip_addr = None
+        ipv4 = self.agent_tracker.get_host_ipv4(hostname)
+        if ipv4 not in ['', None]:
+            ip_addr = ipv4
+        ipv6 = self.agent_tracker.get_host_ipv6(hostname)
+        if ip_addr is not None and ipv6 not in ['', None]:
+            ip_addr = ipv6
+
+        command_port = self.agent_tracker.get_command_port(hostname)
+
+        if ip_addr is None or command_port is -1:
+            return -1
+
+        # Get a new command id
+        command_id = self.agent_tracker.get_command_id(hostname)
+
+        # Get the user information
+        username = self.agent_tracker.get_username(hostname)
+        password = self.agent_tracker.get_password(hostname)
+
+        # Serialize the command
+        command = AgentCommand.serialize_command(target, command_name,\
+                command_id, username, password, command_body)
+
+        # Send the command
+        command_connection = AgentCommandConnection(ip_addr, command_port,\
+                command_id, handler_function, handler_user_data)
+        command_sent = command_connection.send_command(command)
+        if not command_sent:
+            return False
+
+        # Listen for responses if a handler is given
+        if handler_function is not None:
+            command_connection.start()
+        else:
+            command_connection.shutdown()
+
+        return True
+
+
+
+class AgentCommandConnection(Thread):
+
+    def __init__(self, ip, port, command_id, handler_function=None,\
+                 handler_user_data=None):
+        Thread.__init__(self)
+        self.daemon = True
+
+        self.peer_ip = ip
+        self.peer_port = port
+        self.command_id = command_id
+        self.handler_function = handler_function
+        self.handler_user_data = handler_user_data
+        
+        self.should_shutdown = True
+        self.shutdown_lock = Lock()
+
+        self.data_socket = None
+        self.connected = False
+        self.buffer = ''
+        self._connect()
+
+
+    def _connect(self):
+        self.data_socket = socket.socket()
+        self.data_socket = ssl.wrap_socket(self.data_socket)
+        try:
+            self.data_socket.connect((self.peer_ip, self.peer_port))
+            self.connected = True
+        except:
+            err_msg = "AgentListener: Failed to connect for commands to %s:%s"
+            logging.warning(err_msg, str(self.peer_ip), str(self.peer_port),\
+                            exc_info=True)
+            self.connected = False
+
+
+    def _recv(self):
+        chunk = []
+        while message_delimiter not in chunk:
+            try:
+                chunk = self.data_socket.recv(4096)
+            except:
+                logging.error('Failed receiving command from %s:%s',\
+                    str(self.peer_ip), str(self.peer_port))
+                return None
+
+            if chunk == '':
+                return None
+            self.buffer += chunk
+        buffer_parts = self.buffer.split(message_delimiter)
+        self.buffer = buffer_parts[1]
+        logging.debug('Received message from %s:%s.\n%s',\
+                      str(self.peer_ip), str(self.peer_port), buffer_parts[0])
+        return self._parse_command(buffer[0])
+
+
+    def _parse_command(self, serialized_command):
+        # TODO - decide if more checking should be realized here
+        try:
+            command = json.loads(serialized_command)
+            command_body = command[AgentFields.command_response_fields]
+            return command_body
+        except:
+            return None
+
+
+    def send_command(self, data):
+        self.data_socket.setblocking(0)
+        total_sent_b = 0
+        data += message_delimiter
+        length = len(data)
+
+        try:
+            while total_sent_b < length:
+                sent = self.data_socket.send(data[total_sent_b:])
+                if sent is 0:
+                    logging.error('Failed sending command data from %s:%s',\
+                                  str(self.peer_ip), str(self.peer_port))
+                    self.data_socket.setblocking(1)
+                    return False
+
+                total_sent_b += sent
+        except:
+            logging.error('Failed sending command data from %s:%s',\
+                          str(self.peer_ip), str(self.peer_port))
+
+            self.data_socket.setblocking(1)
+            return False
+
+        self.data_socket.setblocking(1)
+        return True
+
+
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        try:
+            self.data_socket.close()
+        except:
+            pass
+        self.shutdown_lock.release()
+
+
+    def run(self):
+        if not self.connected:
+            self.handler_function(None, self.command_id,\
+                                  self.handler_user_data, closed=True)
+            return
+
+        while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+            
+            message = self._recv()
+            if message is None:
+                self.handler_function(None, self.command_id,\
+                                      self.handler_user_data, closed=True)
+                self.shutdown()
+                break
+            if not self.handler_function(message, self.command_id,\
+                                         self.handler_user_data):
+                self.shutdown()
+                break
+
+
+
+class AgentRequest:
+
+    def __init__(self, request):
+        self.request = request
+
+        self.type = None
+        self.body = None
+
+
+    def sanity_check(self):
+        """ Checks the fields. Must be called after initialization """
+        # Check the type
+        try:
+            self.type = self.request.body[AgentRequestBody.type]
+        except:
+            err_msg = 'ServerInterface: Missing type from agent request'
+            logging.warning(err_msg)
+            return False
+
+        # Check the body (optional)
+        if AgentRequestBody.body in self.request.body:
+            self.body = self.request.body[AgentRequestBody.body]
+
+        return True
+
+
+    def get_type(self):
+        return self.type
+
+
+    def get_body(self):
+        return self.body
+
+
+
+class AgentGetConfigsRequest:
+
+    def __init__(self, agent_request):
+        self.body = agent_request.get_body()
+
+        self.hostname = None
+
+
+    def sanity_check(self):
+        try:
+            self.hostname = self.body[AgentGetConfigsRequestBody.hostname]
+        except:
+            err_msg = 'ServerInterface: Missing hostname field from'
+            err_msg += ' agent GET_CONFIGS request'
+            logging.warning(err_msg)
+            return False
+
+        return True
+
+
+    def get_hostname(self):
+        return self.hostname
+
+
+
+class AgentSetConfigsRequest:
+
+    def __init__(self, agent_request):
+        self.body = agent_request.get_body()
+
+        self.hostname = None
+        self.configs = None
+
+    def sanity_check(self):
+        try:
+            self.hostname = self.body[AgentSetConfigsRequestBody.hostname]
+        except:
+            err_msg = 'ServerInterface: Missing hostname field from'
+            err_msg += ' agent SET_CONFIGS request'
+            logging.warning(err_msg)
+            return False
+
+        try:
+            self.configs = self.body[AgentSetConfigsRequestBody.configs]
+        except:
+            err_msg = 'ServerInterface: Missing configs field from'
+            err_msg += ' agent SET_CONFIGS request'
+            logging.warning(err_msg)
+            return False
+
+        return True
+
+
+    def get_hostname(self):
+        return self.hostname
+
+
+    def get_configs(self):
+        return self.configs
+
+
+
+class AgentRestartRequest:
+
+    def __init__(self, agent_request):
+        self.body = agent_request.get_body()
+
+        self.hostname = None
+
+
+    def sanity_check(self):
+        try:
+            self.hostname = self.body[AgentRestartRequestBody.hostname]
+        except:
+            err_msg = 'ServerInterface: Missing hostname field from'
+            err_msg += ' agent RESTART request'
+            logging.warning(err_msg)
+            return False
+
+        return True
+
+
+    def get_hostname(self):
+        return self.hostname
+
+
+class AgentAddUserRequest:
+
+    def __init__(self, agent_request):
+        self.body = agent_request.get_body()
+
+        self.username = None
+        self.password = None
+
+
+    def sanity_check(self):
+        try:
+            self.username = self.body[AgentAddUserRequestBody.agent_username]
+        except:
+            err_msg = 'ServerInterface: Missing agent_username field from'
+            err_msg += ' agent ADD_USER request'
+            logging.warning(err_msg)
+            return False
+
+        try:
+            self.password = self.body[AgentAddUserRequestBody.agent_password]
+        except:
+            err_msg = 'ServerInterface: Missing agent_password field from'
+            err_msg += ' agent ADD_USER request'
+            logging.warning(err_msg)
+            return False
+        
+        return True
+
+
+    def get_username(self):
+        return self.username
+
+
+    def get_password(self):
+        return self.password
+
+
+
+class AgentDelUserRequest:
+
+    def __init__(self, agent_request):
+        self.body = agent_request.get_body()
+
+        self.username = None
+
+
+    def sanity_check(self):
+        try:
+            self.username = self.body[AgentAddUserRequestBody.agent_username]
+        except:
+            err_msg = 'ServerInterface: Missing agent_username field from'
+            err_msg += ' agent DEL_USER request'
+            logging.warning(err_msg)
+            return False
+
+        return True
+
+
+    def get_username(self):
+        return self.username
+
+    
+
+class AgentRequestTypes:
+
+    get_configs = "GET_CONFIGS"
+    set_configs = "SET_CONFIGS"
+    restart = "RESTART"
+    add_user = "ADD_USER"
+    del_user = "DEL_USER"
+    get_users = "GET_USERS"
+
+
+    
+class AgentRequestBody:
+    """
+    The fields for a request sent to the AgentListener.
+    * type: The type of the request. It can have one of the following values:
+      - GET_CONFIGS: It requests the configurations of an agent.
+      - SET_CONFIGS: It requests setting the configurations of an agent.
+      - RESTART: An agent restart is requested.
+      - ADD_USER: Adding a user (or modifying an existing password) is requested.
+      - DEL_USER: Deleting a user is requested.
+      - GET_USERS: It requests the users and their passwords.
+    * body: The body of the request (if required).
+    """
+    type = 'agent_request_type'
+    body = 'agent_request_body'
+
+
+class AgentSetConfigsRequestBody:
+    """
+    The fields for a SET_CONFIGS request.
+    * hostname: The hostname of the agent to be configured.
+    * configs: The configurations to applied to the agent.
+    """
+    hostname = 'hostname'
+    configs = 'configs'
+
+
+class AgentGetConfigsRequestBody:
+    """
+    The fields for a GET_CONFIGS request.
+    * hostname: The hostname of the agent from which to get the configurations.
+    """
+    hostname = 'hostname'
+
+
+class AgentRestartRequestBody:
+    """
+    The fields for a RESTART request.
+    * hostname: The hostname on which the agent should be restarted.
+    """
+    hostname = 'hostname'
+
+
+class AgentAddUserRequestBody:
+    """
+    The fields for an ADD_USER request.
+    * agent_username: The name of the user to be added.
+    * agent_password: The associated password with the username.
+    """
+    agent_username = 'agent_username'
+    agent_password = 'agent_password'
+
+
+class AgentDelUserRequestBody:
+    """
+    The fields for an DEL_USER request.
+    * agent_username: The name of the user to be deleted
+    """
+    agent_username = 'agent_username'
+
+
+# Request responses formats
+
+class AgentGetUsersResponseBody:
+    """
+    The response fields for a "GET_USERS" request.
+    * usernames: A list with all the agent usernames.
+    """
+    usernames = 'usernames'
+
+
+class AgentGetConfigsResponseBody:
+    """
+    The response fields for a "GET_CONFIGS" request.
+    * configs: The configuration dictionary of the agent.
+    """
+    configs = 'configs'
+
+
+# Agent commands serializer
+
+class AgentCommand:
+
+    @staticmethod
+    def serialize_command(self, target, command_name, command_id,\
+                          username=None, password=None, body=dict()):
+        command = dict()
+        command[AgentCommandFields.command] = command_name
+        command[AgentCommandFields.command_id] = command_id
+        command[AgentCommandFields.target] = target
+        command[AgentCommandFields.body] = body
+        if username is not None:
+            command[AgentCommandFields.username] = username
+            command[AgentCommandFields.password] = password
+
+        return json.dumps(command)

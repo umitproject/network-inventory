@@ -38,7 +38,7 @@ class EmailSender(ServerModule, SubscriberServerModule):
     password = 'password'
     enable_html = 'enable_html'
     enable_ssl = 'enable_ssl'
-    enable_tsl = 'enable_starttsl_extension'
+    enable_tls = 'enable_starttls_extension'
     send_for = 'send_for_types'
 
 
@@ -54,7 +54,7 @@ class EmailSender(ServerModule, SubscriberServerModule):
         self.send_for_types = self.options[EmailSender.send_for].split(',')
         self.to_list = self.options[EmailSender.to_list].split(',')
         self.enable_ssl = bool(self.options[EmailSender.enable_ssl])
-        self.enable_tsl = bool(self.options[EmailSender.enable_tsl])
+        self.enable_tls = bool(self.options[EmailSender.enable_tls])
 
 
     def get_name(self):
@@ -71,7 +71,7 @@ class EmailSender(ServerModule, SubscriberServerModule):
         self.options[EmailSender.enable_html] = True
         self.options[EmailSender.send_for] = 'CRITICAL'
         self.options[EmailSender.enable_ssl] = False
-        self.options[EmailSender.enable_tsl] = True
+        self.options[EmailSender.enable_tls] = True
 
 
     def receive_notification(self, notification):
@@ -121,7 +121,7 @@ class EmailSender(ServerModule, SubscriberServerModule):
             server.set_debuglevel(1)
             server.ehlo()
             # Won't enable STARTTLS over a SSL connection
-            if self.enable_tsl and not self.enable_ssl:
+            if self.enable_tls and not self.enable_ssl:
                 server.starttls()
             server.login(self.login, self.password)
             server.sendmail(self.from_addr, self.to_list , msg)
