@@ -27,11 +27,75 @@ class NIShell:
     def __init__(self, core):
         self.core = core
         self.communicator = self.core.server_communicator
+        self.ui_manager = None
+        self.modules = dict()
+        self.host_names = []
+        self.host_ipv4_addresses = {}
+        self.host_ipv6_addresses = {}
 
 
     def set_user_data(self, username, password):
         self.username = username
         self.password = password
+
+
+    def set_hostnames(self, hostnames):
+        self.host_names = hostnames
+
+
+    def set_ipv4_addresess(self, ipv4_addresses):
+        i = 0
+        for i in range(len(self.host_names)):
+            self.host_ipv4_addresses[self.host_names[i]] = ipv4_addresses[i]
+
+
+    def set_ipv6_addresess(self, ipv6_addresses):
+        i = 0
+        for i in range(len(self.host_names)):
+            self.host_ipv6_addresses[self.host_names[i]] = ipv6_addresses[i]
+
+
+    def initialize_modules(self):
+        self.modules = self.core.modules
+
+
+    def request_config_pages(self, config_window_manager):
+        # Called by the ConfigurationWindowManager when pages should be added
+        # to the config window
+        for module in self.modules.values():
+            module.add_configs_ui(config_window_manager)
+
+
+    # General functionality
+
+    def send_request(self, request):
+        self.communicator.send_request(request)
+
+
+    def get_username(self):
+        return self.username
+
+
+    def get_password(self):
+        return self.password
+
+
+    def get_host_names(self):
+        return self.host_names
+
+
+    def get_host_ipv4_address(self, hostname):
+        try:
+            return self.host_ipv4_addresses[hostname]
+        except:
+            return None
+
+
+    def get_host_ipv6_address(self, hostname):
+        try:
+            return self.host_ipv6_addresses[hostname]
+        except:
+            return None
 
 
     # Searching notifications functions

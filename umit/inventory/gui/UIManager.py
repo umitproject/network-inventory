@@ -28,6 +28,8 @@ from umit.inventory.gui.EventWindowManager import EventWindowManager
 from umit.inventory.gui.ReportsHostsView import ReportsHostsView
 from umit.inventory.gui.SearchWindowManager import SearchWindowManager
 from umit.inventory.gui.HostSelectManager import HostSelectManager
+from umit.inventory.gui.ConfigurationWindowManager\
+        import ConfigurationWindowManager
 
 
 # TODO needs refactoring
@@ -45,6 +47,14 @@ ni_hosts_view_file = os.path.join(glade_files_path, 'ni_hosts_view.glade')
 ni_reports_hosts_view = os.path.join(glade_files_path,\
                                      'ni_reports_hosts_view.glade')
 ni_host_select_file = os.path.join(glade_files_path, 'ni_host_select.glade')
+ni_config_window_file = os.path.join(glade_files_path,\
+                                     'ni_config_window.glade')
+ni_server_config_file = os.path.join(glade_files_path,\
+                                     'ni_server_config.glade')
+ni_email_config_file = os.path.join(glade_files_path,\
+                                    'ni_email_config.glade')
+ni_agent_config_file = os.path.join(glade_files_path,\
+                                    'ni_agents_config.glade')
 
 
 class NIUIManager(gobject.GObject):
@@ -89,12 +99,17 @@ class NIUIManager(gobject.GObject):
         'hosts_view' : ni_hosts_view_file,\
         'reports_hosts' : ni_reports_hosts_view,\
         'host_select' : ni_host_select_file,\
+        'config_window' : ni_config_window_file,\
+        'server_config' : ni_server_config_file,\
+        'email_config' : ni_email_config_file,\
+        'agent_config' : ni_agent_config_file,\
     }
 
 
     def __init__(self, core, conf):
         gobject.GObject.__init__(self)
         self.core = core
+        self.shell = core.shell
         self.conf = conf
 
         self.logged_in = False
@@ -115,6 +130,7 @@ class NIUIManager(gobject.GObject):
         self.init_event_window()
 
         self.search_window_manager = SearchWindowManager(self)
+        self.config_window_manager = ConfigurationWindowManager(self)
 
 
     def init_main_window(self):
@@ -289,8 +305,8 @@ class NIUIManager(gobject.GObject):
         self.config_button.connect('clicked', self.on_config_clicked)
         self.config_button.set_label('Settings')
         self.ni_toolbar.insert(self.config_button, -1)
-        self.config_button.show()
         self.config_button.set_sensitive(False)
+        self.config_button.show()
 
         # Add the search events button
         self.search_button = gtk.ToolButton(gtk.STOCK_FIND)
@@ -353,6 +369,11 @@ class NIUIManager(gobject.GObject):
         self.host_info_button.set_sensitive(True)
 
 
+    def enable_configurations(self):
+        """ Called when the config editing options should be sensitive """
+        self.config_button.set_sensitive(True)
+
+
     def set_ips(self, ips):
         """ Sets the IP addresses that will be shown in the GUI """
         self.ips = ips
@@ -394,7 +415,7 @@ class NIUIManager(gobject.GObject):
     # Run state handlers
 
     def on_config_clicked(self, config_button):
-        pass
+        self.config_window_manager.show()
 
 
     def on_search_events_clicked(self, search_button):

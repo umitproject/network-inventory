@@ -74,6 +74,7 @@ class ReportsHostsView(AbstractHostsView):
         col.set_property('resizable', False)
         col.add_attribute(cell, 'text', self.MODEL_COL_TIME)
         self.reports_tree_view.append_column(col)
+        self.reports_tree_view.set_headers_visible(False)
 
 
     def _init_handlers(self):
