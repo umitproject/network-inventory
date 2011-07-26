@@ -17,3 +17,64 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+
+from umit.inventory.gui.Module import Module
+
+class SNMPModule(Module):
+
+    def __init__(self, ui_manager, shell):
+        Module.__init__(self, ui_manager, shell)
+
+
+    def set_configs(self, configs):
+        """
+        Called when the GUI receives the configurations from the server.
+        Should be implemented.
+        """
+        pass
+
+
+    def add_configs_ui(self, config_window_manager):
+        """
+        Called when the module should add pages to the configuration
+        window.
+        config_window_manager: The ConfigurationWindowManager object.
+        Should be implemented.
+        """
+        pass
+
+
+    def add_notebook_page(self, notebook):
+        """
+        Called when the module should add pages to the general GUI notebook.
+        Should be implemented.
+        """
+        pass
+
+
+    def get_host_views(self):
+        """
+        Returns a list of host views (which implement AbstractHostView) to
+        be added to the 'Network Hosts' tab.
+        Should be implemented.
+        """
+        return []
+
+
+    def get_event_widget(self, notification):
+        """
+        Called when the module should return a widget that will show details
+        from the notification. If the notification isn't meant for this module
+        then None should be returned.
+        Should be implemented.
+        """
+        return None
+
+
+    def get_event_window_name(self):
+        """
+        Returns the name that will be shown in the event window when showing
+        information from this module.
+        Should be implemented.
+        """
+        return None
