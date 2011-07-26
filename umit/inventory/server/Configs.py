@@ -66,6 +66,6 @@ class ServerConfig(InventoryConfig):
 
     def _get_default_log_path(self):
         if os.name == 'posix':
-            return '/var/log/umit-notifications-server/'
+            return os.path.abspath('/var/log/umit-notifications-server/')
         else:
-            return 'logs\\umit-notifications-server\\'
+            return os.path.abspath('logs\\umit-notifications-server\\')

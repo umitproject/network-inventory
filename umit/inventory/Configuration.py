@@ -19,13 +19,16 @@
 from ConfigParser import ConfigParser
 import os
 
+
 class InventoryConfig(ConfigParser):
 
     # General section options
     general_section = 'GeneralSection'
 
-    # Log path and default
+    # Log path and level
     log_path = 'log_path'
+    log_level = 'log_level'
+    default_log_level = 'warning'
 
     # Modules standard options
     module_enabled = 'enabled'
@@ -102,7 +105,7 @@ class InventoryConfig(ConfigParser):
         if not self.has_option(section, option):
             return None
 
-        value = ConfigParser.get(self, section, option)
+        value = ConfigParser.get(self, section, option, raw=True)
         if value in ('False', 'false'):
             return False
         return value
@@ -221,6 +224,8 @@ class InventoryConfig(ConfigParser):
         self.add_section(InventoryConfig.general_section)
         self.set(InventoryConfig.general_section, InventoryConfig.log_path,\
                  self._get_default_log_path())
+        self.set(InventoryConfig.general_section, InventoryConfig.log_level,\
+                 InventoryConfig.default_log_level)
 
 
     def _set_default_config_file(self):

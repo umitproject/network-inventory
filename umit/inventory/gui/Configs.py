@@ -54,6 +54,6 @@ class NIConfig(InventoryConfig):
 
     def _get_default_log_path(self):
         if os.name == 'posix':
-            return '/var/log/umit-ni-gui/'
+            return os.path.abspath('/var/log/umit-ni-gui/')
         else:
-            return 'logs\\umit-ni-gui\\'
+            return os.path.abspath('logs\\umit-ni-gui\\')
