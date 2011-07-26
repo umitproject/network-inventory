@@ -34,7 +34,7 @@ def main(args):
     conf = ServerConfig()
 
     # Init the logging
-    Logger.init_logger(conf, logging.DEBUG, True)
+    Logger.init_logger(conf, True)
 
     # Load the Core based on the configs.
     core = ServerCore(conf)

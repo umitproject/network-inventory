@@ -34,7 +34,7 @@ def main(args):
     conf = AgentConfig()
 
     # Init the logging
-    Logger.init_logger(conf, logging.DEBUG, True)
+    Logger.init_logger(conf, True)
 
     # The message Parser which will encrypt (if specified) and send the 
     # messages.

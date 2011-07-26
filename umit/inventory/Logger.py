@@ -21,9 +21,16 @@ import time
 import os
 import random
 
+log_level_dict = {'warning' : logging.WARNING,\
+                  'info' : logging.INFO,\
+                  'critical' : logging.CRITICAL,\
+                  'debug' : logging.DEBUG,\
+                  'error' : logging.ERROR,\
+                  }
+
 from umit.inventory.Configuration import InventoryConfig
 
-def init_logger(configs, l=logging.WARNING, log_to_console=False):
+def init_logger(configs, log_to_console=False):
     """
     configs: An InventoryConfig object which is used to determine the log path.
     l: The log level. See logging module.
@@ -31,7 +38,16 @@ def init_logger(configs, l=logging.WARNING, log_to_console=False):
     try:
         log_path = str(configs.get(InventoryConfig.general_section,\
                 InventoryConfig.log_path))
+
+        l = configs.get(InventoryConfig.general_section,\
+                        InventoryConfig.log_level)
+        try:
+            l = log_level_dict[l]
+        except:
+            l = logging.WARNING
     except:
+        import traceback
+        traceback.print_exc()
         # TODO decide if there is a better way to handle this
         return
 
