@@ -23,7 +23,9 @@ from umit.inventory.gui.UIManager import NIUIManager
 from umit.inventory.gui.ServerCommunicator import SubscribeRequest
 from umit.inventory.gui.ServerCommunicator import UnsubscribeRequest
 from umit.inventory.gui.ServerCommunicator import GetHostsRequest
+from umit.inventory.gui.ServerCommunicator import GetConfigsRequest
 from umit.inventory.gui.Configs import NIConfig
+import umit.inventory.common
 
 import gtk
 from gobject import GObject
@@ -40,12 +42,14 @@ class NICore(GObject):
         GObject.__init__(self)
         self.conf = configurations
         self.server_communicator = NIServerCommunicator(self, configurations)
-        self.ui_manager = NIUIManager(self, configurations)
         self.shell = NIShell(self)
-        self.ui_manager.shell = self.shell
+        self.ui_manager = NIUIManager(self, configurations)
+        self.shell.ui_manager = self.ui_manager
 
+        self.modules = dict()
         self._load_modules()
         self._init_handlers()
+        self.shell.initialize_modules()
 
         self.logged_in = False
         self.network_message_recv = False
@@ -53,7 +57,24 @@ class NICore(GObject):
 
 
     def _load_modules(self):
-        pass
+        modules_names = self.conf.get_modules_list()
+
+        for module_name in modules_names:
+            if not self.conf.module_get_enable(module_name):
+                continue
+        
+            try:
+                module_path = self.conf.module_get_option(module_name,\
+                        NIConfig.module_path)
+                module_obj = umit.inventory.common.load_module(module_name,\
+                        module_path, self.ui_manager, self.shell)
+
+            except Exception, e:
+                traceback.print_exc()
+                continue
+
+            self.modules[module_name] = module_obj
+
 
 
     def _init_handlers(self):
@@ -81,6 +102,17 @@ class NICore(GObject):
             self.ui_manager.add_events_view_notification(body)
 
 
+    def set_configs(self, configs=dict(), failed=False):
+        if failed:
+            return
+
+        for module in self.modules.values():
+            module.set_configs(configs)
+
+        # Enable configurations on the UI side
+        self.ui_manager.enable_configurations()
+
+
     # Methods called by the ServerCommunicator
 
     def set_login_failed(self, msg):
@@ -97,6 +129,8 @@ class NICore(GObject):
             SubscribeRequest(self.username, self.password))
         gobject.idle_add(self.server_communicator.send_request,\
             GetHostsRequest(self.username, self.password, self))
+        gobject.idle_add(self.server_communicator.send_request,\
+            GetConfigsRequest(self.username, self.password, self))
         gobject.idle_add(self.shell.set_user_data, self.username, self.password)
         
         self.conf.set_general_option(NIConfig.ni_server_username, self.username)
@@ -126,6 +160,9 @@ class NICore(GObject):
         # TODO - decide what to do with IPv6 here.
         gobject.idle_add(self.ui_manager.set_hostnames, hostnames)
         gobject.idle_add(self.ui_manager.set_ips, ipv4_addresses)
+        gobject.idle_add(self.shell.set_hostnames, hostnames)
+        gobject.idle_add(self.shell.set_ipv4_addresess, ipv4_addresses)
+        gobject.idle_add(self.shell.set_ipv6_addresess, ipv6_addresses)
 
 
     # Handlers
