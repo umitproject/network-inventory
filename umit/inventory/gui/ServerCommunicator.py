@@ -470,7 +470,7 @@ class GetHostsRequest(Request):
 
         general_request = dict()
         general_request['general_request_type'] = 'GET_HOSTS'
-        general_request['general_request_body'] = []
+        general_request['general_request_body'] = dict()
 
         Request.__init__(self, username, password, general_request)
 
@@ -582,3 +582,65 @@ class SearchStopRequest(Request):
         general_request['general_request_body'] = search_general_request
 
         Request.__init__(self, username, password, general_request)
+
+
+
+class GetConfigsRequest(Request):
+
+    def __init__(self, username, password, core):
+        self.core = core
+        
+        general_request = dict()
+        general_request['general_request_type'] = 'GET_CONFIGS'
+        general_request['general_request_body'] = dict()
+
+        Request.__init__(self, username, password, general_request)
+
+
+    def handle_response(self, response):
+        try:
+            response_code = response['response_code']
+            if response_code != 200:
+                self.core.set_configs(failed=True)
+                return
+
+            response_body = response['body']
+            configs = response_body['configs']
+        except:
+            traceback.print_exc()
+            self.core.set_configs(failed=True)
+            return
+
+        self.core.set_configs(configs)
+
+
+class SetConfigsRequest(Request):
+
+    def __init__(self, username, password, configs, callback):
+        """
+        callback: A function with the definition callback(failed)
+        that will be called when the response will be received.
+        failed will be set to False if the request was succesful.
+        """
+        self.callback = callback
+        set_configs_body = dict()
+        set_configs_body['configs'] = configs
+
+        general_request = dict()
+        general_request['general_request_type'] = 'SET_CONFIGS'
+        general_request['general_request_body'] = set_configs_body
+
+        Request.__init__(self, username, password, general_request)
+
+
+    def handle_response(self, response):
+        try:
+            response_code = response['response_code']
+            if response_code != 200:
+                self.callback(True)
+                return
+        except:
+            traceback.print_exc()
+            self.callback(True)
+            return
+        self.callback(False)
