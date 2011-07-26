@@ -42,9 +42,10 @@ class MonitoringModule(Thread):
         self.name = self.get_name()
 
         # Get the options from the configs and save them
-        module_config_options = configs.items(self.get_name())
-        for option in module_config_options:
-            self.options[option[0]] = option[1]
+        module_config_options = configs.options(self.get_name())
+        for option_name in module_config_options:
+            self.options[option_name] = configs.get(self.get_name(),\
+                                                    option_name)
 
         # Log the configurations
         logging.info('Configurations for module %s:\n%s', self.get_name(),\
@@ -57,6 +58,21 @@ class MonitoringModule(Thread):
     def get_name(self):
         """Must be implemented by the Monitoring Module"""
         raise MonitoringModule.NotImplemented('get_name')
+
+
+    def handle_command(self, command, command_id, command_body,\
+                       command_connection):
+        """
+        A command for this module was received. The module should handle the
+        command depending on it's type.
+        * command: The name of the command.
+        * command_id: The id of the command (or -1 if async responses
+          are expected)
+        * command_body: The body of the command (if needed).
+        * command_connection: The connection to send responses (if needed).
+        Should be implemented.
+        """
+        pass
 
 
     def get_prefix(self):

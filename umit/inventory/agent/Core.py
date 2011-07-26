@@ -22,11 +22,15 @@ import logging
 import json
 import time
 import ssl
+from OpenSSL import crypto
+import os
+import tempfile
 from collections import deque
 
 from umit.inventory.agent.Configs import AgentConfig
 from umit.inventory.common import CorruptInventoryModule
 from umit.inventory.common import AgentFields
+from umit.inventory.common import AgentCommandFields
 from umit.inventory import common
 from umit.inventory.common import message_delimiter
 from umit.inventory.common import keep_alive_timeout
@@ -55,7 +59,18 @@ class AgentMainLoop:
         self.conf = configurations
         self.keep_alive_timer = time.time()
 
-        # If we should shut-down
+        self.command_connections = []
+        self.command_id_to_connection = {}
+        self.command_connections_lock = threading.Lock()
+
+        # Mapping command names to functions
+        self.command_functions = {'GET_CONFIGS' : self.handle_get_configs,\
+                                  'SET_CONFIGS' : self.handle_set_configs,\
+                                  'RESTART' : self.handle_restart,\
+                                  'CLOSE_CONNECTION' : self.handle_close_connection,\
+                                  }
+        
+        # If we should shutdown
         self.shutdown = False
 
         # Get the polling time for the loop
@@ -67,6 +82,17 @@ class AgentMainLoop:
             configurations.get_general_option(AgentConfig.auth_enabled)
         self.username = configurations.get_general_option(AgentConfig.username)
         self.password = configurations.get_general_option(AgentConfig.password)
+
+        # Start the command listener
+        if not self.auth_enabled:
+            username = None
+            password = None
+        else:
+            username = self.username
+            password = self.password
+        self.command_listener = CommandListener(self, username, password)
+        message_parser.set_command_port(self.command_listener.get_command_port())
+        self.command_listener.start()
 
 
     def _parse_messages(self):
@@ -92,6 +118,113 @@ class AgentMainLoop:
 
         self.added_message_queue_lock.release()
 
+
+    def add_command_connection(self, command_connection):
+        """ Called when a new command connection was created """
+        self.command_connections_lock.acquire()
+        self.command_connections.append(command_connection)
+        self.command_connections_lock.release()
+
+
+    def close_command_connection(self, command_connection):
+        """ Called when a command connection was closed """
+        self.command_connections_lock.acquire()
+        try:
+            self.command_connections.remove(command_connection)
+            for command_id in self.command_id_to_connection.keys():
+                if self.command_id_to_connection[command_id] == command_connection:
+                    del self.command_id_to_connection[command_id]
+        except:
+            pass
+        self.command_connections_lock.release()
+
+        
+    def handle_command(self, target, command, body, command_id,\
+                       command_connection):
+        # If this command_id is already mapped to a connection, close the
+        # previous one
+        self.command_connections_lock.acquire()
+        if command_id in self.command_id_to_connection.keys():
+            del_command_connection = self.command_id_to_connection[command_id]
+            del_command_connection.shutdown()
+            self.command_connections.remove(del_command_connection)
+            del self.command_id_to_connection[command_id]
+        self.command_connections_lock.release()
+
+        # Mapping command id's to their connection
+        self.command_id_to_connection[command_id] = command_connection
+
+        if target is 'GENERAL':
+            try:
+                self.command_functions[command](command, command_id, body,\
+                                                command_connection)
+            except:
+                logging.warning('Received invalid command name')
+            return
+        else:
+            for module in self.modules:
+                module_name = module.get_name()
+                if target is module_name:
+                    module.handle_command(command, command_id, body,\
+                                          command_connection)
+                    return
+            logging.warning('Received invalid command target')
+
+
+    def handle_set_configs(self, command, command_id, body, command_connection):
+        configs = body
+        try:
+            for section in configs.keys():
+                options = configs[section]
+                for option_name in options.keys():
+                    option_value = options[option_name]
+                    self.conf.set(section, option_name, option_value)
+        except:
+            logging.warning('Received invalid SET_CONFIGS body', exc_info=True)
+        command_connection.shutdown()
+
+
+    def handle_get_configs(self, command, command_id, body, command_connection):
+        configs = dict()
+        section_names = self.conf.sections()
+        for section_name in section_names:
+            section = dict()
+            option_names = self.conf.options(section_name)
+            for option_name in option_names:
+                option_value = self.conf.get(section_name, option_name)
+                section[option_name] = option_value
+            configs[section_name] = section
+
+        response = AgentNotificationParser.encode_command_response(\
+            configs, command, command_id)
+
+        command_connection.send(response + message_delimiter)
+        command_connection.close()
+
+
+    def handle_restart(self, command, command_id, body, command_connection):
+        # TODO
+        logging.info('Restart required by Notifications Server')
+        command_connection.close()
+
+
+    def handle_close_connection(self, command, command_id, body,\
+                                command_connection):
+        closed_command_id = body
+        
+        self.command_connections_lock.acquire()
+        try:
+            del_command_connection =\
+                    self.command_id_to_connection[closed_command_id]
+        except:
+            return
+
+        del_command_connection.shutdown()
+        self.command_connections.remove(del_command_connection)
+        del self.command_id_to_connection[closed_command_id]
+        self.command_connections_lock.release()
+        command_connection.shutdown()
+        
 
     def run(self):
         """
@@ -182,8 +315,7 @@ class AgentNotificationParser:
         It also offers the option to encrypt the messages if specified trough
         SSL.
         """
-        self.command_port =\
-            int(configs.get_general_option(AgentConfig.command_port))
+        self.command_port = -1
         self.server_addr = configs.get_general_option(AgentConfig.server_addr)
         self.server_port = configs.get_general_option(AgentConfig.server_port)
         self.server_port = int(self.server_port)
@@ -201,6 +333,10 @@ class AgentNotificationParser:
             configs.get_general_option(AgentConfig.username)
         AgentNotificationParser.password =\
             configs.get_general_option(AgentConfig.password)
+
+
+    def set_command_port(self, command_port):
+        self.command_port = command_port
 
 
     def send_keep_alive(self):
@@ -340,6 +476,299 @@ class AgentNotificationParser:
             message_obj[AgentFields.password] = AgentNotificationParser.password
 
         return json.dumps(message_obj)
+
+
+    @staticmethod
+    def encode_command_response(command_fields, command, command_id=-1):
+        """ Used to encode a command response. """
+        message_obj = dict()
+        message_obj[AgentFields.hostname] = socket.gethostname()
+        message_obj[AgentFields.timestamp] = time.time()
+        message_obj[AgentFields.message_type] = 'COMMAND_RESPONSE'
+        message_obj[AgentFields.command_id] = command_id
+        message_obj[AgentFields.command] = command
+        message_obj[AgentFields.command_response_fields] = command_fields
+
+        if AgentNotificationParser.auth_enabled:
+            message_obj[AgentFields.username] = AgentNotificationParser.username
+            message_obj[AgentFields.password] = AgentNotificationParser.password
+
+        return json.dumps(message_obj)
+
+
+
+class CommandListener(threading.Thread):
+
+    min_port = 10001
+    max_port = 30000
+
+    # SSL certificate expiration: 10 years
+    cert_expire = 316224000
+
+    # SSL files
+    cert_file_name = os.path.join(tempfile.gettempdir(),\
+                                  'umit_agent.cert')
+    key_file_name = os.path.join(tempfile.gettempdir(),\
+                                 'umit_agent.key')
+
+
+    def __init__(self, main_loop, username=None, password=None):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.main_loop = main_loop
+
+        # Authentication dependent settings
+        if username is None:
+            self.auth_enabled = False
+        self.username = username
+        self.password = password
+
+        self.shutdown_lock = threading.Lock()
+        self.should_shutdown = False
+
+        self.command_port = None
+        self.command_socket = socket.socket()
+        self._generate_ssl_files()
+        if not self.ssl_files_generated:
+            return
+        self._bind()
+
+
+    def _generate_ssl_files(self):
+        # Certificate and key files only for this session
+        try:
+            key_file = open(self.key_file_name, 'w')
+            cert_file = open(self.cert_file_name, 'w')
+        except:
+            err_msg = 'Failed generated command port SSL files.\n'
+            err_msg += 'For command functionality ensure permissions at %s' %\
+                       tempfile.gettempdir()
+            err_msg += ' or run the agent with administrative privileges.'
+            logging.error(err_msg)
+            self.ssl_files_generated = False
+            return
+
+        # Generate the key
+        key = crypto.PKey()
+        key.generate_key(crypto.TYPE_RSA, 1024)
+
+        # Generate the certificate
+        cert = crypto.X509()
+        cert.gmtime_adj_notBefore(0)
+        cert.gmtime_adj_notAfter(self.cert_expire)
+        cert.set_issuer(cert.get_subject())
+        cert.set_pubkey(key)
+        cert.sign(key, 'sha1')
+
+        # Write to files
+        cert_file.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+        key_file.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, key))
+        key_file.close()
+        cert_file.close()
+        self.ssl_files_generated = True
+
+
+    def _bind(self):
+        # Find an open socket
+        for port in range(self.min_port, self.max_port):
+            try:
+                self.command_socket.bind(('0.0.0.0', port))
+            except:
+                continue
+            self.command_port = port
+            break
+
+        if self.command_port is None:
+            logging.error('Failed binding to command port')
+        else:
+            logging.info('Listening for commands on port %d', self.command_port)
+            
+        self.command_socket.listen(1)
+
+
+    def _accept_connections(self):
+        if not self.ssl_files_generated:
+            return
+        conn, addr = self.command_socket.accept()
+        peer_host = addr[0]
+        peer_port = addr[1]
+        data_socket = ssl.wrap_socket(conn, server_side=True,\
+                                      keyfile=self.key_file_name,\
+                                      certfile=self.cert_file_name)
+        logging.info('Accepted command connection from %s:%s',\
+                     str(peer_host), str(peer_port))
+
+        self.main_loop.add_command_connection(CommandConnection(data_socket,\
+                self.main_loop, self.username, self.password))
+
+
+    def get_command_port(self):
+        return self.command_port
+
+
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
+
+
+    def run(self):
+        if not self.ssl_files_generated:
+            return
+
+        while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+        
+            self._accept_connections()
+            
+
+
+class CommandConnection(threading.Thread):
+
+    def __init__(self, data_socket, main_loop, username=None, password=None):
+        threading.Thread.__init__(self)
+        self.daemon = True
+
+        self.data_socket = data_socket
+        self.main_loop = main_loop
+        self.buffer = ''
+
+        self.shutdown_lock = threading.Lock()
+        self.should_shutdown = False
+
+        peer = self.data_socket.getpeername()
+        self.peer_host = str(peer[0])
+        self.peer_port = str(peer[1])
+
+        # Authentication dependent settings
+        if username is None:
+            self.auth_enabled = False
+        self.username = username
+        self.password = password
+
+
+    def recv(self):
+        chunk = []
+        while message_delimiter not in chunk:
+            try:
+                chunk = self.data_socket.recv(4096)
+            except:
+                logging.error('Failed receiving command from %s:%s',\
+                    self.peer_host, self.peer_port)
+                return None
+
+            if chunk == '':
+                return None
+            self.buffer += chunk
+        buffer_parts = self.buffer.split(message_delimiter)
+        self.buffer = buffer_parts[1]
+        logging.debug('Received message from %s:%s.\n%s',\
+                      self.peer_host, self.peer_port, buffer_parts[0])
+        return buffer_parts[0]
+
+
+    def send(self, data):
+        self.data_socket.setblocking(0)
+        total_sent_b = 0
+        data += message_delimiter
+        length = len(data)
+
+        try:
+            while total_sent_b < length:
+                sent = self.data_socket.send(data[total_sent_b:])
+                if sent is 0:
+                    logging.error('Failed sending command data from %s:%s',\
+                                  self.peer_host, self.peer_port)
+                    self.data_socket.setblocking(1)
+                    return False
+
+                total_sent_b += sent
+        except:
+            logging.error('Failed sending command data from %s:%s',\
+                          self.peer_host, self.peer_port)
+
+            self.data_socket.setblocking(1)
+            return False
+
+        self.data_socket.setblocking(1)
+        return True
+
+
+    def handle_command(self, message):
+        try:
+            command = json.loads(message)
+        except:
+            logging.warning('Received not JSON-seriazable command from %s:%s',\
+                            self.peer_host, self.peer_port)
+            return False
+
+        # Get authentication data
+        try:
+            if self.auth_enabled:
+                username = command[AgentCommandFields.username]
+                password = command[AgentCommandFields.password]
+            else:
+                username = None
+                password = None
+        except:
+            err_msg = 'Missing username and/or password in command from %s:%s'
+            logging.warning(err_msg, self.peer_host, self.peer_port)
+            return False
+
+        # Authenticate if configured so
+        if self.auth_enabled:
+            if username != self.username or password != self.password:
+                err_msg = 'Authentication failed in command from %s:%s'
+                logging.warning(err_msg, self.peer_host, self.peer_port)
+                return False
+
+        try:
+            target = str(command[AgentCommandFields.target])
+            command_id = int(command[AgentCommandFields.command_id])
+            command = str(command[AgentCommandFields.command])
+            body = AgentCommandFields.body
+        except:
+            err_msg = 'Received invalid command from %s:%s'
+            logging.warning(err_msg, self.peer_host, self.peer_port)
+            return False
+
+        self.main_loop.handle_command(target, command, body, command_id)
+        return True
+        
+    
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
+
+        try:
+            self.data_socket.close()
+        except:
+            pass
+        self.main_loop.close_command_connection(self)
+
+
+    def run(self):
+        while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+
+            message = self.recv()
+            if message is None:
+                self.shutdown()
+                break
+
+            if not self.handle_command(message):
+                self.shutdown()
+                break
+
 
 
 class CorruptAgentModule(CorruptInventoryModule):

@@ -17,6 +17,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import logging
+import os
 
 # The message delimiter used for TCP communication
 message_delimiter = '\x00\x01\x02\x03'
@@ -54,7 +55,8 @@ class AgentFields:
     timestamp = 'timestamp'
     message_type = 'type'
 
-    # Only present if message_type is not 'KEEP_ALIVE' or 'GOING_DOWN'
+    # Only present if message_type is one of the values defined in the
+    # NotificationTypes class.
     message = 'message'
     short_message = 'short_message'
     is_report = 'is_report'
@@ -64,9 +66,43 @@ class AgentFields:
     # Only present if the message_type is 'KEEP_ALIVE'
     command_port = 'command_port'
 
+    # Only present if message_type is 'COMMAND_RESPONSE'
+    command_id = 'command_id'
+    command = 'command'
+    command_response_fields = 'command_response_fields'
+
     # Optional: Only if authentication is enabled (for any message type)
     username = 'username'
     password = 'password'
+
+
+
+class AgentCommandFields:
+    """
+    The fields for a command message that is send on the command port.
+    * target: The target of the command. It can be a module name or 'GENERAL'
+      for a general command.
+    * command: The name of the command. It depends on the target. If the target
+      is general it can have one of the following values:
+      - "GET_CONFIGS": The Notifications Server requests the configurations of
+        the agent.
+      - "SET_CONFIGS": The Notifications Server requests setting the configs
+        of the agent.
+      - "RESTART": The Notifications Server request restarting the agent.
+      - "CLOSE_CONNECTION": An request to close an existing connection.
+    * command_id: An integer to match the response (if any) to the command.
+      Should be -1 for asynchronous responses.
+    * username: If agent authentication is enabled, the username of the agent.
+    * password: If agent authentication is enabled, the password of the agent.
+    * body: The actual body of the command (if needed). If it's not needed,
+      it should be an empty dictionary.
+    """
+    target = 'target'
+    command = 'command'
+    command_id = 'command_id'
+    username = 'username'
+    password = 'password'
+    body = 'body'
 
 
 

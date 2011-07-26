@@ -57,6 +57,8 @@ class DeviceSensor(MonitoringModule):
     report_time = 'report_time'
     report_template_file = 'report_template_file'
     notification_cond_file = 'notification_cond_file'
+    reporting_enabled = 'reporting_enabled'
+    
 
     # Module fields
     uptime = 'uptime'
@@ -77,11 +79,14 @@ class DeviceSensor(MonitoringModule):
                 str(self.options[DeviceSensor.report_template_file])
         self.notification_cond_file =\
                 str(self.options[DeviceSensor.notification_cond_file])
-
+        self.reporting_enabled = \
+                bool(self.options[DeviceSensor.reporting_enabled])
+        
         self.measurement_manager = MeasurementManager()
         self.trackers_manager = TrackersManager(self.notification_cond_file, self)
-        self.trackers_manager.parse_report_file(self.report_template_file,\
-                self.report_time)
+        if self.reporting_enabled:
+            self.trackers_manager.parse_report_file(self.report_template_file,\
+                    self.report_time)
 
 
     def get_name(self):
@@ -114,6 +119,7 @@ class DeviceSensor(MonitoringModule):
         self.options[DeviceSensor.notification_cond_file] =\
                 os.path.join('umit', 'inventory', 'agent', 'modules',\
                 'device_sensor_notification_cond.txt')
+        self.options[DeviceSensor.reporting_enabled] = False
 
 
     def update(self):
