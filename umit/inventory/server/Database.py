@@ -256,8 +256,6 @@ class Database:
                                 unique=unique_key, background=background_exec)
 
 
-
-
     # Private methods
 
     def _init_default_settings(self):
@@ -283,6 +281,10 @@ class Database:
         for option_name in options_names:
             self.options[option_name] =\
                     configs.get(Database.config_section_name, option_name)
+
+        for option_name in self.options.keys():
+            configs.set(Database.config_section_name, option_name,\
+                        self.options[option_name])
 
 
     def _connect(self):

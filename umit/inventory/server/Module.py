@@ -18,6 +18,8 @@
 
 import json
 import logging
+from umit.inventory.Configuration import InventoryConfig
+
 
 class ServerModule:
     """The interface for a generic ServerModule."""
@@ -32,12 +34,54 @@ class ServerModule:
         self.init_default_settings()
 
         # Get the options from the configs and save them
-        module_options = self.configs.items(self.get_name())
+        module_options = self.configs.options(self.get_name())
         for option in module_options:
-            self.options[option[0]] = option[1]
+            self.options[option] = self.configs.get(self.get_name(), option)
+
+        # Save the configurations
+        for option_name in self.options.keys():
+            self.configs.set(self.get_name(), option_name,\
+                             self.options[option_name])
 
         logging.info('Initialized module %s with options:\n%s', self.get_name(),\
                      json.dumps(self.options, sort_keys=True, indent=4))
+
+        if self.is_enabled():
+            logging.info('Module %s is enabled.', self.get_name())
+        else:
+            logging.info('Module %s is disabled.', self.get_name())
+
+
+    def activate(self):
+        """
+        Called when the module is enabled.
+        Should be implemented.
+        """
+        pass
+
+
+    def deactive(self):
+        """
+        Called when the module is disabled.
+        Should be implemented.
+        """
+        pass
+
+
+    def refresh_settings(self):
+        """
+        Called when the configurations are changed.
+        Should be implemented.
+        """
+        pass
+
+
+    def is_enabled(self):
+        """ Returns True if the module is enabled """
+        try:
+            return self.options[InventoryConfig.module_enabled]
+        except:
+            return False
 
 
     def get_name(self):

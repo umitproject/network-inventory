@@ -17,7 +17,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import logging
-import socket
+import json
 import time
 from threading import Lock
 
@@ -31,6 +31,7 @@ from umit.inventory.common import CorruptInventoryModule
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 import umit.inventory.common
+from umit.inventory.Configuration import InventoryConfig
 
 from twisted.internet import reactor
 
@@ -68,6 +69,9 @@ class ServerCore:
         # Initialize the Notification system
         Notification.registered_classes[Notification.get_name()] = Notification
 
+        # Save the configs
+        self.configs.save_settings()
+
         logging.info('Initialized ServerCore')
 
 
@@ -78,8 +82,6 @@ class ServerCore:
         logging.info('Loading modules ...')
         for module_name in modules_names:
             logging.info('Trying to initialize %s ...', module_name)
-            if not self.configs.module_get_enable(module_name):
-                continue
             try:
                 module_path = self.configs.module_get_option(module_name,\
                         ServerConfig.module_path)
@@ -100,20 +102,60 @@ class ServerCore:
                 logging.error('Failed loading module %s',\
                               module_name, exc_info=True)
                 continue
+                
             self.modules[module_name] = module_obj
+            if module_obj.is_enabled():
+                module_obj.activate()
+
         logging.info('Loaded modules')
         
         # Init subscriptions. This is done now because all modules must be
         # loaded and initialized before the subscribtions are done.
         logging.info('Initializing modules subscriptions ...')
         for module in self.modules.values():
+            if not module.is_enabled():
+                continue
+                
             if isinstance(module, SubscriberServerModule):
                 module.subscribe()
         logging.info('Initialized modules subscriptions.')
 
         # Init the database operations for each module.
         for module in self.modules.values():
+            if not module.is_enabled():
+                continue
             module.init_database_operations()
+
+
+    def update_configs(self, configs):
+        try:
+            logging.info('Updating configurations.\n%s',\
+                         json.dumps(configs, sort_keys=True, indent=4))
+        except:
+            logging.warning('Invalid configuration change request',\
+                            exc_info=True)
+
+        try:
+            sections = configs.keys()
+            for section in sections:
+                options = configs[section]
+                for option_name in options.keys():
+                    option_value = options[option_name]
+                    self.configs.set(section, option_name, option_value)
+
+                # If a module, refresh it's settings and activate if needed
+                if section in self.modules.keys():
+                    module = self.modules[section]
+                    if not module.is_enabled() and\
+                       self.configs.get(section, InventoryConfig.module_enabled):
+                        module.activate()
+                    module.refresh_settings()
+
+            # Save the settings
+            self.configs.save_settings()
+        except:
+            logging.error('Changing server configurations failed',\
+                          exc_info=True)
 
 
     def run(self):
@@ -123,6 +165,8 @@ class ServerCore:
         # Call the modules which implement ListenerServerModule so they
         # will start listening.
         for module in self.modules.values():
+            if not module.is_enabled():
+                continue
             if isinstance(module, ListenerServerModule):
                 module.listen()
         self.server_interface.listen()
@@ -270,6 +314,15 @@ class ServerShell:
         for subscriber in self._full_subscribers:
             subscriber.receive_notification(notification)
         self.raise_notification_lock.release()
+
+
+    def update_configs(self, configs):
+        """
+        Updates the server configurations.
+        configs: A dictionary with keys having section names and as values
+        dictionaries with (option_name, option_value) entries.
+        """
+        self._core.update_configs(configs)
 
 
 class InvalidSubscriber(Exception):
