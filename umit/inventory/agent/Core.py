@@ -154,17 +154,17 @@ class AgentMainLoop:
         # Mapping command id's to their connection
         self.command_id_to_connection[command_id] = command_connection
 
-        if target is 'GENERAL':
+        if target == 'GENERAL':
             try:
                 self.command_functions[command](command, command_id, body,\
                                                 command_connection)
             except:
-                logging.warning('Received invalid command name')
+                logging.warning('Received invalid command name', exc_info=True)
             return
         else:
             for module in self.modules:
                 module_name = module.get_name()
-                if target is module_name:
+                if target == module_name:
                     module.handle_command(command, command_id, body,\
                                           command_connection)
                     return
@@ -198,14 +198,14 @@ class AgentMainLoop:
         response = AgentNotificationParser.encode_command_response(\
             configs, command, command_id)
 
-        command_connection.send(response + message_delimiter)
-        command_connection.close()
+        command_connection.send(response)
+        command_connection.shutdown()
 
 
     def handle_restart(self, command, command_id, body, command_connection):
         # TODO
         logging.info('Restart required by Notifications Server')
-        command_connection.close()
+        command_connection.shutdown()
 
 
     def handle_close_connection(self, command, command_id, body,\
@@ -598,8 +598,10 @@ class CommandListener(threading.Thread):
         logging.info('Accepted command connection from %s:%s',\
                      str(peer_host), str(peer_port))
 
-        self.main_loop.add_command_connection(CommandConnection(data_socket,\
-                self.main_loop, self.username, self.password))
+        command_connection = CommandConnection(data_socket,\
+                self.main_loop, self.username, self.password)
+        command_connection.start()
+        self.main_loop.add_command_connection(command_connection)
 
 
     def get_command_port(self):
@@ -645,8 +647,7 @@ class CommandConnection(threading.Thread):
         self.peer_port = str(peer[1])
 
         # Authentication dependent settings
-        if username is None:
-            self.auth_enabled = False
+        self.auth_enabled = username is None
         self.username = username
         self.password = password
 
@@ -694,6 +695,9 @@ class CommandConnection(threading.Thread):
             self.data_socket.setblocking(1)
             return False
 
+        logging.debug('Sent command response to %s:%s.\n %s',\
+                      self.peer_host, self.peer_port, data)
+
         self.data_socket.setblocking(1)
         return True
 
@@ -705,7 +709,7 @@ class CommandConnection(threading.Thread):
             logging.warning('Received not JSON-seriazable command from %s:%s',\
                             self.peer_host, self.peer_port)
             return False
-
+        
         # Get authentication data
         try:
             if self.auth_enabled:
@@ -736,7 +740,7 @@ class CommandConnection(threading.Thread):
             logging.warning(err_msg, self.peer_host, self.peer_port)
             return False
 
-        self.main_loop.handle_command(target, command, body, command_id)
+        self.main_loop.handle_command(target, command, body, command_id, self)
         return True
         
     

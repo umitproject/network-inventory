@@ -25,7 +25,7 @@ message_delimiter = '\x00\x01\x02\x03'
 # The time interval between consecutive KEEP_ALIVE Agent messages.
 # An Agent is considered down if the Notifications Server doesn't receive
 # a KEEP_ALIVE message in 3 times. It's expressed in number of seconds.
-keep_alive_timeout = 5.0
+keep_alive_timeout = 30.0
 
 
 class NotificationTypes:

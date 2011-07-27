@@ -321,7 +321,7 @@ class AgentGetConfigsRequest(Request):
                                  self.hostname)
                 return
             
-            response_body = response['response_body']
+            response_body = response['body']
             configs = response_body['configs']
         except:
             traceback.print_exc()

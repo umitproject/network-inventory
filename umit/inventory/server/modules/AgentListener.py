@@ -891,11 +891,12 @@ class AgentCommandTracker:
         # Serialize the command
         command = AgentCommand.serialize_command(target, command_name,\
                 command_id, username, password, command_body)
-
+        
         # Send the command
         command_connection = AgentCommandConnection(ip_addr, command_port,\
                 command_id, handler_function, handler_user_data)
         command_sent = command_connection.send_command(command)
+
         if not command_sent:
             return False
 
@@ -922,7 +923,7 @@ class AgentCommandConnection(Thread):
         self.handler_function = handler_function
         self.handler_user_data = handler_user_data
         
-        self.should_shutdown = True
+        self.should_shutdown = False
         self.shutdown_lock = Lock()
 
         self.data_socket = None
@@ -951,17 +952,18 @@ class AgentCommandConnection(Thread):
                 chunk = self.data_socket.recv(4096)
             except:
                 logging.error('Failed receiving command from %s:%s',\
-                    str(self.peer_ip), str(self.peer_port))
+                    str(self.peer_ip), str(self.peer_port), exc_info=True)
                 return None
 
             if chunk == '':
                 return None
             self.buffer += chunk
+
         buffer_parts = self.buffer.split(message_delimiter)
         self.buffer = buffer_parts[1]
         logging.debug('Received message from %s:%s.\n%s',\
                       str(self.peer_ip), str(self.peer_port), buffer_parts[0])
-        return self._parse_command(buffer[0])
+        return self._parse_command(buffer_parts[0])
 
 
     def _parse_command(self, serialized_command):
@@ -1023,8 +1025,9 @@ class AgentCommandConnection(Thread):
                 self.shutdown_lock.release()
                 break
             self.shutdown_lock.release()
-            
+
             message = self._recv()
+
             if message is None:
                 self.handler_function(None, self.command_id,\
                                       self.handler_user_data, closed=True)
@@ -1315,7 +1318,7 @@ class AgentGetConfigsResponseBody:
 class AgentCommand:
 
     @staticmethod
-    def serialize_command(self, target, command_name, command_id,\
+    def serialize_command(target, command_name, command_id,\
                           username=None, password=None, body=dict()):
         command = dict()
         command[AgentCommandFields.command] = command_name
