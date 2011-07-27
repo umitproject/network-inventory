@@ -167,16 +167,14 @@ class UmitAgentModule(Module):
         cell.connect('edited', self.on_agent_config_value_cell_edited)
 
 
-    def tree_view_option_name_data_func(self, column, cell, model,\
-                                        iter, user_data):
+    def tree_view_option_name_data_func(self, column, cell, model, iter):
         # Get option or section name
         name = model.get_value(iter, self.AGENT_CONFIG_MODEL_COL_NAME)
 
         cell.set_property('markup', '<b>%s</b>' % name)
 
 
-    def tree_view_option_value_data_func(self, column, cell, model,\
-                                         iter, user_data):
+    def tree_view_option_value_data_func(self, column, cell, model, iter):
         # Determine if it's a section or option iter
         is_section_iter = model.iter_parent(iter) is None
         
