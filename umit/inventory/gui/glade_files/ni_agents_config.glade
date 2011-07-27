@@ -172,9 +172,10 @@
                                         <property name="vscrollbar_policy">automatic</property>
                                         <property name="shadow_type">in</property>
                                         <child>
-                                          <object class="GtkTreeView" id="config_tree_view">
+                                          <object class="GtkTreeView" id="config_treeview">
                                             <property name="visible">True</property>
                                             <property name="can_focus">True</property>
+                                            <property name="search_column">0</property>
                                           </object>
                                         </child>
                                       </object>

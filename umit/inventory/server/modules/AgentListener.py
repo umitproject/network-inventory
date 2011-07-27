@@ -154,6 +154,16 @@ class AgentListener(ListenerServerModule, ServerModule):
         return 'UmitAgent'
 
 
+    def get_agent_tracker(self):
+        """ Returns the instance of the AgentTracker, or None on failure """
+        return self.agent_tracker
+
+
+    def get_agent_tracker(self):
+        """ Returns the instance of the CommandTracker, or None on failure """
+        return self.command_tracker
+
+
     def init_database_operations(self):
         # Construct the users dictionary with entries (username: md5_pass)
         # used to authenticate notifications if this is enabled.

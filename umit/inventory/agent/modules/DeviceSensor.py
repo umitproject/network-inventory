@@ -1458,7 +1458,7 @@ class NetworkTraffic(Thread):
 class LinuxNetworkTraffic(NetworkTraffic):
 
     # Time between reading the information in seconds
-    sleep_time = 2.0
+    sleep_time = 1.0
 
     @staticmethod
     def get_instance():

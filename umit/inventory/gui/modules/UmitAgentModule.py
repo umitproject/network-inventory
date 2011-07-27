@@ -36,6 +36,11 @@ agent_logo = os.path.join(pixbuf_paths, 'agent_config.png')
 
 class UmitAgentModule(Module):
 
+    # Agent config model columns
+    AGENT_CONFIG_MODEL_COL_NAME = 0
+    AGENT_CONFIG_MODEL_COL_VALUE = 1
+    
+
     def __init__(self, ui_manager, shell):
         Module.__init__(self, ui_manager, shell)
 
@@ -75,6 +80,7 @@ class UmitAgentModule(Module):
         self._build_config_objects()
         self._init_host_combo()
         self._init_config_values()
+        self._init_agent_config_treeview()
         self._init_config_handlers()
 
         pixbuf = gtk.gdk.pixbuf_new_from_file(agent_logo)
@@ -105,6 +111,8 @@ class UmitAgentModule(Module):
         self.select_button.set_sensitive(False)
         self.agent_apply_button.set_sensitive(False)
         self.agent_restore_button.set_sensitive(False)
+
+        self.config_model = None
         
 
     def _init_host_combo(self):
@@ -135,6 +143,54 @@ class UmitAgentModule(Module):
 
         self.port_entries_valid = {self.udp_port_entry : True,\
                                    self.ssl_port_entry : True}
+
+
+    def _init_agent_config_treeview(self):
+        # Option name column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Option Name', cell)
+        col.set_min_width(150)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_option_name_data_func)
+        self.config_treeview.append_column(col)
+
+        # Option value column
+        cell = gtk.CellRendererText()
+        col = gtk.TreeViewColumn('Option Value', cell)
+        col.set_min_width(150)
+        col.set_alignment(0.5)
+        col.set_property('resizable', True)
+        col.set_cell_data_func(cell, self.tree_view_option_value_data_func)
+        self.config_treeview.append_column(col)
+
+        cell.connect('edited', self.on_agent_config_value_cell_edited)
+
+
+    def tree_view_option_name_data_func(self, column, cell, model,\
+                                        iter, user_data):
+        # Get option or section name
+        name = model.get_value(iter, self.AGENT_CONFIG_MODEL_COL_NAME)
+
+        cell.set_property('markup', '<b>%s</b>' % name)
+
+
+    def tree_view_option_value_data_func(self, column, cell, model,\
+                                         iter, user_data):
+        # Determine if it's a section or option iter
+        is_section_iter = model.iter_parent(iter) is None
+        
+        # Get option value
+        value = model.get_value(iter, self.AGENT_CONFIG_MODEL_COL_VALUE)
+
+        # Editable only if it's an option iter
+        cell.set_property('editable', not is_section_iter)
+        cell.set_property('text', value)
+
+    
+    def on_agent_config_value_cell_edited(self, cellrenderertext, path,\
+                                          new_text):
+        pass
 
 
     def _init_config_handlers(self):
@@ -229,6 +285,10 @@ class UmitAgentModule(Module):
 
         request = AgentGetConfigsRequest(username, password, hostname, self)
         self.shell.send_request(request)
+
+        self.config_treeview.set_model(None)
+
+        select_button.set_sensitive(False)
         
 
     def on_agent_apply_button_clicked(self, agent_apply_button):
@@ -254,8 +314,33 @@ class UmitAgentModule(Module):
 
     def agent_configs_received(self, configs):
         """Called when the agent configs were received"""
-        print configs
-        
+        # Initialize the model
+        self.config_model = gtk.TreeStore(gobject.TYPE_STRING,\
+                                          gobject.TYPE_STRING)
+
+        try:
+            for section_name in configs.keys():
+                iter = self.config_model.append(None)
+                self.config_model.set(iter,\
+                    self.AGENT_CONFIG_MODEL_COL_NAME, section_name,\
+                    self.AGENT_CONFIG_MODEL_COL_VALUE, '')
+
+                for option_name in configs[section_name].keys():
+                    option_value = configs[section_name][option_name]
+
+                    iter2 = self.config_model.append(iter)
+                    self.config_model.set(iter2,\
+                        self.AGENT_CONFIG_MODEL_COL_NAME, option_name,\
+                        self.AGENT_CONFIG_MODEL_COL_VALUE, option_value)
+
+            self.config_treeview.set_model(self.config_model)
+            self.config_treeview.expand_all()
+        except:
+            error_title = 'Invalid response'
+            error_msg = 'Received an invalid response from the host.\n'
+            error_msg += 'It\'s installation may be corrupt.'
+            self.config_window_manager.show_error(error_msg, error_title)
+
         self.select_button.set_sensitive(True)
         
 
