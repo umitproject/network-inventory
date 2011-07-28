@@ -114,11 +114,11 @@ class DeviceSensor(MonitoringModule):
         self.options[DeviceSensor.test_time] = '0.25'
         self.options[DeviceSensor.report_time] = '10'
         self.options[DeviceSensor.report_template_file] =\
-                os.path.join('umit', 'inventory', 'agent', 'modules',\
-                'device_sensor_report_template.txt')
+                os.path.abspath(os.path.join('umit', 'inventory', 'agent',\
+                'modules', 'device_sensor_report_template.txt'))
         self.options[DeviceSensor.notification_cond_file] =\
-                os.path.join('umit', 'inventory', 'agent', 'modules',\
-                'device_sensor_notification_cond.txt')
+                os.path.abspath(os.path.join('umit', 'inventory', 'agent',\
+                'modules', 'device_sensor_notification_cond.txt'))
         self.options[DeviceSensor.reporting_enabled] = False
 
 

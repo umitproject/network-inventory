@@ -40,12 +40,18 @@ class MonitoringModule(Thread):
         self.init_default_settings()
         self.daemon = True
         self.name = self.get_name()
+        self.configs = configs
 
         # Get the options from the configs and save them
         module_config_options = configs.options(self.get_name())
         for option_name in module_config_options:
             self.options[option_name] = configs.get(self.get_name(),\
                                                     option_name)
+
+        # Store the configurations
+        for option_name in self.options.keys():
+            option_value = self.options[option_name]
+            configs.set(self.get_name(), option_name, option_value)
 
         # Log the configurations
         logging.info('Configurations for module %s:\n%s', self.get_name(),\
@@ -70,6 +76,15 @@ class MonitoringModule(Thread):
           are expected)
         * command_body: The body of the command (if needed).
         * command_connection: The connection to send responses (if needed).
+        Should be implemented.
+        """
+        pass
+
+
+    def update_configs(self):
+        """
+        Called when a configuration change was detected. The module should
+        check the new configurations and update itself accordingly.
         Should be implemented.
         """
         pass

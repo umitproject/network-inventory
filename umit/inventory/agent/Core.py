@@ -263,6 +263,9 @@ class AgentMainLoop:
                 logging.info('Loaded module %s', module_obj.get_name())
                 self.modules.append(module_obj)
 
+            # Store the modules configurations
+            self.conf.save_settings()
+
             # Start up the modules
             for module in self.modules:
                 module.start()
