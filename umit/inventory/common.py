@@ -109,7 +109,7 @@ class AgentCommandFields:
 def load_module(module_name, module_path, *module_args):
     """Loads a module with the given name from the given path."""
 
-    path_tokens = module_path.split('/')
+    path_tokens = module_path.split(os.path.sep)
     modname = ''
     for path_token in path_tokens:
         modname += path_token + '.'
