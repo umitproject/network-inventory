@@ -39,12 +39,14 @@ class NIConfig(InventoryConfig):
         self.add_section('SNMPModule')
         self.set('SNMPModule', InventoryConfig.module_path,\
                 os.path.join('umit', 'inventory', 'gui', 'modules'))
-        self.set('SNMPModule', InventoryConfig.module_enabled, False)
+        self.set('SNMPModule', InventoryConfig.module_enabled, True)
+        self.set('SNMPModule', InventoryConfig.is_module, True)
 
         self.add_section('UmitAgentModule')
         self.set('UmitAgentModule', InventoryConfig.module_path,\
                 os.path.join('umit', 'inventory', 'gui', 'modules'))
-        self.set('UmitAgentModule', InventoryConfig.module_enabled, False)
+        self.set('UmitAgentModule', InventoryConfig.module_enabled, True)
+        self.set('UmitAgentModule', InventoryConfig.is_module, True)
 
 
     def _set_default_config_file(self):

@@ -46,15 +46,31 @@ class ServerConfig(InventoryConfig):
                  str(ServerConfig.default_force_interface_encrypt))
     
         # Module default settings
+        # !! TODO - refactor this is another place. This should be added trough
+        # !! a ServerCore add_module() method.
         self.add_section('AgentListener')
         self.set('AgentListener', InventoryConfig.module_path,\
                 os.path.join('umit', 'inventory', 'server', 'modules'))
         self.set('AgentListener', InventoryConfig.module_enabled, True)
+        self.set('AgentListener', InventoryConfig.is_module, True)
 
         self.add_section('SNMPListener')
         self.set('SNMPListener', InventoryConfig.module_path,\
                 os.path.join('umit', 'inventory', 'server', 'modules'))
-        self.set('SNMPListener', InventoryConfig.module_enabled, False)
+        self.set('SNMPListener', InventoryConfig.module_enabled, True)
+        self.set('SNMPListener', InventoryConfig.is_module, True)
+
+        self.add_section('EmailSender')
+        self.set('EmailSender', InventoryConfig.module_path,\
+                os.path.join('umit', 'inventory', 'server', 'modules'))
+        self.set('EmailSender', InventoryConfig.module_enabled, False)
+        self.set('EmailSender', InventoryConfig.is_module, True)
+
+        self.add_section('NetworkAdministratorSender')
+        self.set('NetworkAdministratorSender', InventoryConfig.module_path,\
+                os.path.join('umit', 'inventory', 'server', 'modules'))
+        self.set('NetworkAdministratorSender', InventoryConfig.module_enabled, False)
+        self.set('NetworkAdministratorSender', InventoryConfig.is_module, True)
 
         self.add_section('Database')
 
