@@ -71,8 +71,10 @@ class AgentListener(ListenerServerModule, ServerModule):
     cert_expire = 316224000
 
     # SSL files
-    cert_file_name = os.path.join(tempfile.gettempdir(), 'umit_agent.cert')
-    key_file_name = os.path.join(tempfile.gettempdir(), 'umit_agent.key')
+    cert_file_name = os.path.join(tempfile.gettempdir(),\
+                                  'umit_agent_server_module.cert')
+    key_file_name = os.path.join(tempfile.gettempdir(),\
+                                 'umit_agent_server_module.key')
 
 
     def __init__(self, configs, shell):
