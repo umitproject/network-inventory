@@ -307,7 +307,7 @@ class UmitAgentModule(Module):
         # Get the configs
         configs = dict()
         try:
-            iter = self.config_model.iter_first()
+            iter = self.config_model.get_iter_first()
             while iter is not None:
                 section_name = self.config_model.get_value(iter,\
                     self.AGENT_CONFIG_MODEL_COL_NAME)
@@ -321,12 +321,23 @@ class UmitAgentModule(Module):
                         self.AGENT_CONFIG_MODEL_COL_VALUE)
                     configs[section_name][option_name] = option_value
                     
-                    iter2 = self.config_model.iter_next()
-                iter = self.config_model.iter_next()
+                    iter2 = self.config_model.iter_next(iter2)
+                iter = self.config_model.iter_next(iter)
         except:
             traceback.print_exc()
             return
 
+        username = self.shell.get_username()
+        password = self.shell.get_password()
+
+        hostname_combo_entry = self.host_combo.get_child()
+        hostname = hostname_combo_entry.get_text()
+
+        request = AgentSetConfigsRequest(username, password, hostname,\
+                                         configs, self)
+        self.shell.send_request(request)
+
+        self.agent_configs = configs
         
 
     def on_agent_restore_button_clicked(self, agent_restore_button):
@@ -344,7 +355,9 @@ class UmitAgentModule(Module):
         self.config_window_manager.show_error(error_msg, error_title)
 
         self.select_button.set_sensitive(True)
-    
+        self.agent_apply_button.set_sensitive(False)
+        self.agent_restore_button.set_sensitive(False)
+       
 
     def agent_configs_received(self, configs):
         """Called when the agent configs were received"""
@@ -379,6 +392,8 @@ class UmitAgentModule(Module):
             error_title = 'Invalid response'
             error_msg = 'Received an invalid response from the host.\n'
             error_msg += 'It\'s installation may be corrupt.'
+            self.agent_apply_button.set_sensitive(False)
+            self.agent_restore_button.set_sensitive(False)
             self.config_window_manager.show_error(error_msg, error_title)
 
         self.select_button.set_sensitive(True)
@@ -455,3 +470,37 @@ class AgentGetConfigsRequest(Request):
             return
 
         gobject.idle_add(self.agent_module.agent_configs_received, configs)
+
+
+
+class AgentSetConfigsRequest(Request):
+
+    def __init__(self, username, password, hostname, configs, agent_module):
+        self.agent_module = agent_module
+        self.hostname = hostname
+        self.configs = configs
+
+        agent_request_body = dict()
+        agent_request_body['hostname'] = hostname
+        agent_request_body['configs'] = configs
+        
+        agent_request = dict()
+        agent_request['agent_request_type'] = 'SET_CONFIGS'
+        agent_request['agent_request_body'] = agent_request_body
+
+        Request.__init__(self, username, password, agent_request,\
+                            'AgentListener')
+
+
+    def handle_response(self, response):
+        try:
+            response_code = response['response_code']
+            if response_code != 200:
+                gobject.idle_add(self.agent_module.agent_configs_error,\
+                                 self.hostname)
+                return
+        except:
+            traceback.print_exc()
+            gobject.idle_add(self.agent_module.agent_configs_error,\
+                             self.hostname)
+            return

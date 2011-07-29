@@ -494,7 +494,16 @@ class AgentListener(ListenerServerModule, ServerModule):
 
     def get_configs_handler(self, message, command_id, user_data, closed=False):
         req_id = user_data
-        data_connection = self.get_configs_map[command_id]
+        try:
+            data_connection = self.get_configs_map[command_id]
+        except:
+            err_msg = 'AgentListener: Failed sending agent GET_CONFIGS response.'
+            err_msg += '\ndata_connection object not found for command_id: %s' %\
+                        command_id
+            err_msg += '\nDumping get_configs_map dict:\n'
+            err_msg += '%s' % str(self.get_configs_map)
+            logging.error(err_msg, exc_info=True)
+            return
 
         if closed:
             err_msg = 'AgentListener: Failed GET_CONFIGS from agent.\n'
@@ -879,6 +888,9 @@ class AgentCommandTracker:
 
         Returns a positive integer representing the command id, or -1 on failure.
         """
+        logging.debug('AgentListener: Trying to send a command [%s:%s] to %s...',\
+                      target, command_name, hostname)
+        
         # Get the host information
         ip_addr = None
         ipv4 = self.agent_tracker.get_host_ipv4(hostname)
@@ -891,11 +903,18 @@ class AgentCommandTracker:
         command_port = self.agent_tracker.get_command_port(hostname)
 
         if ip_addr is None or command_port is -1:
+            dbg_msg = 'AgentListener: Failed obtaining host info to'
+            dbg_msg += ' send the command.\n'
+            dbg_msg += 'Agent IP Address: %s\n' % str(ip_addr)
+            dbg_msg += 'Agent Command Port: %s' % str(command_port)
+            logging.debug(dbg_msg)
             return -1
 
         # Get a new command id
         command_id = self.agent_tracker.get_command_id(hostname)
-
+        logging.debug('AgentListener: Sending command with id %s to %s:%s',\
+                      str(command_id), str(ip_addr), str(command_port))
+        
         # Get the user information
         username = self.agent_tracker.get_username(hostname)
         password = self.agent_tracker.get_password(hostname)
@@ -910,7 +929,8 @@ class AgentCommandTracker:
         command_sent = command_connection.send_command(command)
 
         if not command_sent:
-            return False
+            logging.debug('AgentListener: Failed sending command.')
+            return -1
 
         # Listen for responses if a handler is given
         if handler_function is not None:
@@ -918,7 +938,8 @@ class AgentCommandTracker:
         else:
             command_connection.shutdown()
 
-        return True
+        logging.debug('AgentListener: Command sent succesfully.')
+        return command_id
 
 
 

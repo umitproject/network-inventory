@@ -48,6 +48,18 @@ class NIConfig(InventoryConfig):
         self.set('UmitAgentModule', InventoryConfig.module_enabled, True)
         self.set('UmitAgentModule', InventoryConfig.is_module, True)
 
+        self.add_section('EMailNotifierModule')
+        self.set('EMailNotifierModule', InventoryConfig.module_path,\
+                os.path.join('umit', 'inventory', 'gui', 'modules'))
+        self.set('EMailNotifierModule', InventoryConfig.module_enabled, True)
+        self.set('EMailNotifierModule', InventoryConfig.is_module, True)
+
+        self.add_section('ServerModule')
+        self.set('ServerModule', InventoryConfig.module_path,\
+                os.path.join('umit', 'inventory', 'gui', 'modules'))
+        self.set('ServerModule', InventoryConfig.module_enabled, True)
+        self.set('ServerModule', InventoryConfig.is_module, True)
+
 
     def _set_default_config_file(self):
         """Sets the default configuration file"""

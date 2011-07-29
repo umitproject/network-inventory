@@ -187,8 +187,18 @@ class AgentMainLoop:
                     self.conf.set(section, option_name, option_value)
         except:
             logging.warning('Received invalid SET_CONFIGS body', exc_info=True)
+            command_connection.shutdown()
+            return
+
         command_connection.shutdown()
 
+        # Update the module configs
+        for module in self.modules:
+            module.update_configs()
+
+        # Store the configs
+        self.conf.save_settings()
+    
 
     def handle_get_configs(self, command, command_id, body, command_connection):
         configs = dict()
@@ -766,14 +776,16 @@ class CommandConnection(threading.Thread):
         try:
             target = str(command[AgentCommandFields.target])
             command_id = int(command[AgentCommandFields.command_id])
-            command = str(command[AgentCommandFields.command])
-            body = AgentCommandFields.body
+            command_name = str(command[AgentCommandFields.command])
+            body = command[AgentCommandFields.body]
         except:
             err_msg = 'Received invalid command from %s:%s'
-            logging.warning(err_msg, self.peer_host, self.peer_port)
+            logging.warning(err_msg, self.peer_host, self.peer_port,\
+                            exc_info=True)
             return False
 
-        self.main_loop.handle_command(target, command, body, command_id, self)
+        self.main_loop.handle_command(target, command_name,\
+                                      body, command_id, self)
         return True
         
     

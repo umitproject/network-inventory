@@ -79,7 +79,7 @@ class AgentConfig(InventoryConfig):
         self.set('TestModule', AgentConfig.module_path,\
             os.path.join('umit', 'inventory', 'agent', 'modules'))
         self.set('TestModule', AgentConfig.module_enabled, False)
-        self.set('DeviceSensor', AgentConfig.is_module, True)
+        self.set('TestModule', AgentConfig.is_module, True)
 
 
     def _set_default_config_file(self):
