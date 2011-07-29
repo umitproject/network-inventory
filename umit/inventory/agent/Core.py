@@ -548,10 +548,13 @@ class CommandListener(threading.Thread):
         self.main_loop = main_loop
 
         # Authentication dependent settings
-        if username is None:
-            self.auth_enabled = False
-        self.username = username
-        self.password = password
+        self.auth_enabled = username is not None
+        if not self.auth_enabled:
+            self.username = None
+            self.password = None
+        else:
+            self.username = username
+            self.password = password
 
         self.shutdown_lock = threading.Lock()
         self.should_shutdown = False
@@ -677,7 +680,7 @@ class CommandConnection(threading.Thread):
         self.peer_port = str(peer[1])
 
         # Authentication dependent settings
-        self.auth_enabled = username is None
+        self.auth_enabled = username is not None
         self.username = username
         self.password = password
 
