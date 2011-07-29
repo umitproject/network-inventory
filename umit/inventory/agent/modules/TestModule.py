@@ -28,6 +28,9 @@ from umit.inventory.common import NotificationTypes
 
 class TestModule(MonitoringModule):
 
+    # Deactivated polling time (time between checking if it got activated)
+    deactivated_polling_time = 5.0
+    
     # The name of the fields in the configuration file
     min_time_config = "min_time"
     max_time_config = "max_time"
@@ -49,6 +52,8 @@ class TestModule(MonitoringModule):
         self.should_shutdown = False
         self.shutdown_lock = threading.Lock()
 
+        self.activated = False
+        self.activated_lock = threading.Lock()
 
     def get_name(self):
         return 'TestModule'
@@ -58,6 +63,18 @@ class TestModule(MonitoringModule):
         return 'test_module'
 
 
+    def activate(self):
+        self.activated_lock.acquire()
+        self.activated = True
+        self.activated_lock.release()
+
+
+    def deactivate(self):
+        self.activated_lock.acquire()
+        self.activated = False
+        self.activated_lock.release()
+
+        
     def _generate_random_message(self):
         # Waits a random time and generates a random message.
         temp = random() * (self.max_sleep_time - self.min_sleep_time)
@@ -101,6 +118,13 @@ class TestModule(MonitoringModule):
     def run(self):
         logging.info('Starting up the %s module ...', self.get_name())
         while True:
+            self.activated_lock.acquire()
+            if not self.activated:
+                self.activated_lock.release()
+                time.sleep(self.deactivated_polling_time)
+                continue
+            self.activated_lock.release()
+            
             msg = self._generate_random_message()
             short_msg = 'Random message generated at %f' % time.time()
             msg_type = self._generate_random_type()

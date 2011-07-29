@@ -34,6 +34,7 @@ from umit.inventory.common import AgentCommandFields
 from umit.inventory import common
 from umit.inventory.common import message_delimiter
 from umit.inventory.common import keep_alive_timeout
+from umit.inventory.Configuration import InventoryConfig
 
 
 class AgentMainLoop:
@@ -87,12 +88,17 @@ class AgentMainLoop:
         if not self.auth_enabled:
             username = None
             password = None
+            logging.info('Starting the CommandListener with auth disabled ...')
         else:
             username = self.username
             password = self.password
+            logging.info('Starting the CommandListener with auth enabled ...')
         self.command_listener = CommandListener(self, username, password)
         message_parser.set_command_port(self.command_listener.get_command_port())
+        logging.info('CommandListener is using port %d to receive commands',\
+                     self.command_listener.get_command_port())
         self.command_listener.start()
+        logging.info('CommandListener started')
 
 
     def _parse_messages(self):
@@ -237,8 +243,6 @@ class AgentMainLoop:
             logging.info('Loading up the modules ...')
             modules_names = self.conf.get_modules_list()
             for module_name in modules_names:
-                if not self.conf.module_get_enable(module_name):
-                    continue
                 try:
                     module_path = self.conf.module_get_option(module_name,\
                             AgentConfig.module_path)
@@ -262,19 +266,35 @@ class AgentMainLoop:
 
                 logging.info('Loaded module %s', module_obj.get_name())
                 self.modules.append(module_obj)
+            logging.info('Done loading modules.')
 
             # Store the modules configurations
+            logging.info('Saving current settings to the config file ...')
             self.conf.save_settings()
+            logging.info('Current settings saved to the config file.')
 
             # Start up the modules
+            logging.info('Starting modules threads ...')
             for module in self.modules:
                 module.start()
+            logging.info('Started modules threads.')
+
+            logging.info('Activating modules ...')
+            # Activate the modules
+            for module in self.modules:
+                module_enabled = self.conf.get(module.get_name(),\
+                        InventoryConfig.module_enabled)
+                if module_enabled:
+                    module.activate()
+            logging.info('Done activating modules.')
 
             # Send the keep-alive message
+            logging.info('Sending first KEEP_ALIVE')
             self.message_parser.send_keep_alive()
-
+            logging.info('Sent first KEEP_ALIVE')
+            
             # The actual main loop
-            logging.info('Starting the Agent Main Loop')
+            logging.info('Starting the Agent Main Loop ...')
             while True:
                 if self.shutdown:
                     # Send the going-down message
@@ -417,6 +437,9 @@ class AgentNotificationParser:
                 while total_sent_b < length:
                     sent = s.send(sent_data[total_sent_b:])
                     if sent is 0:
+                        err_msg = 'Failed to send notification to Server.\n'
+                        err_msg += 'send() returned 0'
+                        logging.error(err_msg)
                         s.close()
                         return False
                     total_sent_b += sent
@@ -428,11 +451,15 @@ class AgentNotificationParser:
             # the notifications we have in the queue (if any)
             if not emptying_queue:
                 self.send_notifications_from_queue()
+
+            logging.info('Successfully sent notification.')
             return True
         # Send trough UDP
         else:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.sendto(message, (self.server_addr, self.server_port))
+            logging.info('Successfully sent notification.')
+            return True
 
 
     def send_notifications_from_queue(self):

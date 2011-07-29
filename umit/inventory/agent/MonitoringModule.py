@@ -54,12 +54,29 @@ class MonitoringModule(Thread):
             configs.set(self.get_name(), option_name, option_value)
 
         # Log the configurations
-        logging.info('Configurations for module %s:\n%s', self.get_name(),\
+        logging.info('Initialized modue %s with configurations:\n%s',\
+                     self.get_name(),\
                      json.dumps(self.options, sort_keys=True, indent=4))
 
         # Save the agent Main Loop which will get the Module's messages
         self.agent_main_loop = agent_main_loop
 
+
+    def activate(self):
+        """
+        Called when the module must activate itself.
+        Must be implemented.
+        """
+        raise MonitoringModule.NotImplemented('activate')
+
+
+    def deactivate(self):
+        """
+        Called when the module must deactivate itself.
+        Must be implemented.
+        """
+        raise MonitoringModule.NotImplemented('deactivate')
+    
 
     def get_name(self):
         """Must be implemented by the Monitoring Module"""

@@ -52,6 +52,9 @@ if WIN:
 
 class DeviceSensor(MonitoringModule):
 
+    # Deactivated polling time (time between checking if it got activated)
+    deactivated_polling_time = 5.0
+    
     # The name of the fields in the configuration file
     test_time = 'test_time'
     report_time = 'report_time'
@@ -81,12 +84,11 @@ class DeviceSensor(MonitoringModule):
                 str(self.options[DeviceSensor.notification_cond_file])
         self.reporting_enabled = \
                 bool(self.options[DeviceSensor.reporting_enabled])
-        
-        self.measurement_manager = MeasurementManager()
-        self.trackers_manager = TrackersManager(self.notification_cond_file, self)
-        if self.reporting_enabled:
-            self.trackers_manager.parse_report_file(self.report_template_file,\
-                    self.report_time)
+
+        self.activated_lock = Lock()
+        self.activated = False
+        self.activation_request = False
+        self.deactivation_request = False
 
 
     def get_name(self):
@@ -97,9 +99,64 @@ class DeviceSensor(MonitoringModule):
         return 'device_sensor'
 
 
+    def activate(self):
+        self.activated_lock.acquire()
+        if self.activated:
+            self.activated_lock.release()
+            return
+        self.activation_request = True
+        self.deactivation_request = False
+        self.activated_lock.release()
+        logging.info('Activating DeviceSensor module ...')
+
+
+    def deactivate(self):
+        self.activated_lock.acquire()
+        if not self.activated:
+            self.activated_lock.release()
+            return
+        self.activation_request = False
+        self.deactivation_request = True
+        self.activated_lock.release()
+        logging.info('Deactivating DeviceSensor module ...')
+
+
+    def _do_activate(self):
+        self.measurement_manager = MeasurementManager()
+        self.trackers_manager = TrackersManager(self.notification_cond_file, self)
+        if self.reporting_enabled:
+            self.trackers_manager.parse_report_file(self.report_template_file,\
+                    self.report_time)
+        self.activated = True
+
+
+    def _do_deactivate(self):
+        self.measurement_manager.shutdown()
+        self.measurement_manager = None
+        self.trackers_manager = None
+        self.activated = False
+
+
     def run(self):
-        logging.info('Starting up the %s module ...', self.get_name())
         while True:
+            self.activated_lock.acquire()
+            # If we aren't activated and we didn't got an activate request
+            if not self.activated and not self.activation_request:
+                self.activated_lock.release()
+                time.sleep(self.deactivated_polling_time)
+                continue
+
+            # If we should deactivate
+            if self.activated and self.deactivation_request:
+                self._do_deactivate()
+                self.activated_lock.release()
+                continue
+                
+            # If we should activate
+            if not self.activated and self.activation_request:
+                self._do_activate()
+
+            self.activated_lock.release()
             
             pre_update_time = time.time()
             self.update()
@@ -291,6 +348,12 @@ class MeasurementManager:
         """ Updates the variables with new measurements if required."""
         for measurement_gen in self.measured_variables.values():
             measurement_gen.measure()
+
+
+    def shutdown(self):
+        """ Shutdowns all the measurements """
+        for measurement_gen in self.measured_variables.values():
+            measurement_gen.shutdown()
             
 
     def get_variable(self, var_id):
@@ -859,6 +922,14 @@ class MeasurementGenerator:
         pass
 
 
+    def shutdown(self):
+        """
+        If any special activity should be done when shutting down.
+        Should be implemented.
+        """
+        pass
+
+
 
 # Measurement generators -- START
 
@@ -1017,6 +1088,11 @@ class NetworkTrafficGenerator(MeasurementGenerator):
             self.network_traffic = None
 
 
+    def shutdown(self):
+        if self.network_traffic is not None:
+            self.network_traffic.shutdown()
+
+
 class NetworkReceivedBytesGenerator(NetworkTrafficGenerator):
     """
     Computes the received network bytes.
@@ -1147,6 +1223,10 @@ class CpuPercentGenerator(MeasurementGenerator):
         self.latest_value = self.cpu_percent.get_value()
 
 
+    def shutdown(self):
+        self.cpu_percent.shutdown()
+
+
 class PartitionAvailableGenerator(MeasurementGenerator):
     """
     Computes the total available number of bytes on the given list of partitions.
@@ -1232,6 +1312,10 @@ class ProcessInfoGenerator(MeasurementGenerator):
     def get_latest_value(self, tracker=None):
         self.measure(True)
         return self.latest_value
+
+
+    def shutdown(self):
+        self.processes_info.shutdown()
 
 
     def measure(self, full_measure=False):
@@ -1398,6 +1482,10 @@ class NetworkTraffic(Thread):
         # Used to inform when the object is ready to give relevant statistics
         self.ramp_up = True
 
+        # When shutting down
+        self.should_shutdown = False
+        self.shutdown_lock = Lock()
+
 
     def init_counters(self):
         self.received_bytes = 0
@@ -1408,44 +1496,62 @@ class NetworkTraffic(Thread):
         self.sent_bps = 0.0
 
 
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
+
+
     def get_received_bytes(self):
         self.traffic_lock.acquire()
-        temp = self.received_bytes if not self.ramp_up else None
+        temp = None
+        if not self.ramp_up or not self.should_shutdown:
+            temp = self.received_bytes
         self.traffic_lock.release()
         return temp
 
 
     def get_sent_bytes(self):
         self.traffic_lock.acquire()
-        temp = self.sent_bytes if not self.ramp_up else None
+        temp = None
+        if not self.ramp_up or not self.should_shutdown:
+            temp = self.sent_bytes
         self.traffic_lock.release()
         return temp
 
 
     def get_received_packets(self):
         self.traffic_lock.acquire()
-        temp = self.received_packets if not self.ramp_up else None
+        temp = None
+        if not self.ramp_up or not self.should_shutdown:
+            temp = self.received_packets
         self.traffic_lock.release()
         return temp
 
 
     def get_sent_packets(self):
         self.traffic_lock.acquire()
-        temp = self.sent_packets if not self.ramp_up else None
+        temp = None
+        if not self.ramp_up or not self.should_shutdown:
+            temp = self.sent_packets
         self.traffic_lock.release()
         return temp
 
 
     def get_received_bps(self):
         self.traffic_lock.acquire()
-        temp = self.received_bps if not self.ramp_up else None
+        temp = None
+        if not self.ramp_up or not self.should_shutdown:
+            temp = self.received_bps
         self.traffic_lock.release()
         return temp
 
 
     def get_sent_bps(self):
         self.traffic_lock.acquire()
-        temp = self.sent_bps if not self.ramp_up else None
+        temp = None
+        if not self.ramp_up or not self.should_shutdown:
+            temp = self.sent_bps
         self.traffic_lock.release()
         return temp
 
@@ -1472,6 +1578,13 @@ class LinuxNetworkTraffic(NetworkTraffic):
         step = 0
         logging.info('Starting up Network Traffic measurement ...')
         while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                NetworkTraffic.instance = None
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+            
             # Waiting until previous measures are done.
             if step < 2:
                 step += 1
@@ -1543,6 +1656,13 @@ class WindowsNetworkTraffic(NetworkTraffic):
         step = 0
         logging.info('Starting up Network Traffic measurement ...')
         while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                NetworkTraffic.instance = None
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+            
             # Waiting until previous measures are done.
             if step < 2:
                 step += 1
@@ -1599,6 +1719,9 @@ class ProcessesInfo(Thread):
         self.daemon = True
         self.ramp_up = True
 
+        self.shutdown_lock = Lock()
+        self.should_shutdown = False
+
         # Init the processes cpu%
         pid_list = psutil.get_pid_list()
         self.processes = {}
@@ -1620,9 +1743,22 @@ class ProcessesInfo(Thread):
         return ProcessesInfo.instance
 
 
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
+
+
     def run(self):
         logging.info('Starting DeviceSensor ProcessesInfo ...')
         while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                ProcessesInfo.instance = None
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+            
             self.compute_new_information()
             time.sleep(3.0)
 
@@ -1728,11 +1864,25 @@ class CpuPercent(Thread):
         self.cpu_percent_lock = Lock()
         self.daemon = True
 
+        self.shutdown_lock = Lock()
+        self.should_shutdown = False
+
+
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
 
 
     def run(self):
         logging.info('Starting up DeviceSensor CpuPercent ...')
         while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+            
             temp = psutil.cpu_percent(interval=0.4)
             self.cpu_percent_lock.acquire()
             self.cpu_percent = temp
