@@ -52,6 +52,8 @@ class UmitAgentModule(Module):
         # If the configurations are present and valid
         self.valid_configs = False
 
+        self.agent_configs = None
+        
 
     def set_configs(self, configs):
         self.configs = configs
@@ -188,7 +190,15 @@ class UmitAgentModule(Module):
     
     def on_agent_config_value_cell_edited(self, cellrenderertext, path,\
                                           new_text):
-        pass
+        iter = self.config_model.get_iter(path)
+        self.config_model.set(iter, self.AGENT_CONFIG_MODEL_COL_VALUE, new_text)
+
+
+    def on_config_treeview_row_activated(self, treeview, path, view_column):
+        if treeview.row_expanded(path):
+            treeview.collapse_row(path)
+        else:
+            treeview.expand_row(path, False)
 
 
     def _init_config_handlers(self):
@@ -204,8 +214,10 @@ class UmitAgentModule(Module):
         self.udp_port_entry.connect('changed', self.on_port_entry_changed)
         self.ssl_port_entry.connect('changed', self.on_port_entry_changed)
         self.host_combo.connect('changed', self.on_host_combo_changed)
+        self.config_treeview.connect('row-activated',\
+                self.on_config_treeview_row_activated)
 
-
+        
     def on_module_apply_button_clicked(self, module_apply_button):
         # Get the values
         self.udp_port = int(self.udp_port_entry.get_text())
@@ -285,16 +297,40 @@ class UmitAgentModule(Module):
         self.shell.send_request(request)
 
         self.config_treeview.set_model(None)
-
+        self.agent_configs = None
         select_button.set_sensitive(False)
+        self.agent_apply_button.set_sensitive(False)
+        self.agent_restore_button.set_sensitive(False)
         
 
     def on_agent_apply_button_clicked(self, agent_apply_button):
-        pass
+        # Get the configs
+        configs = dict()
+        try:
+            iter = self.config_model.iter_first()
+            while iter is not None:
+                section_name = self.config_model.get_value(iter,\
+                    self.AGENT_CONFIG_MODEL_COL_NAME)
+                configs[section_name] = dict()
+                
+                iter2 = self.config_model.iter_children(iter)
+                while iter2 is not None:
+                    option_name = self.config_model.get_value(iter2,\
+                        self.AGENT_CONFIG_MODEL_COL_NAME)
+                    option_value = self.config_model.get_value(iter2,\
+                        self.AGENT_CONFIG_MODEL_COL_VALUE)
+                    configs[section_name][option_name] = option_value
+                    
+                    iter2 = self.config_model.iter_next()
+                iter = self.config_model.iter_next()
+        except:
+            traceback.print_exc()
+            return
 
+        
 
     def on_agent_restore_button_clicked(self, agent_restore_button):
-        pass
+        self.agent_configs_received(self.agent_configs)
 
 
     def agent_configs_error(self, hostname):
@@ -312,6 +348,9 @@ class UmitAgentModule(Module):
 
     def agent_configs_received(self, configs):
         """Called when the agent configs were received"""
+        if configs is None:
+            return
+        
         # Initialize the model
         self.config_model = gtk.TreeStore(gobject.TYPE_STRING,\
                                           gobject.TYPE_STRING)
@@ -333,6 +372,9 @@ class UmitAgentModule(Module):
 
             self.config_treeview.set_model(self.config_model)
             self.config_treeview.expand_all()
+            self.agent_configs = configs
+            self.agent_apply_button.set_sensitive(True)
+            self.agent_restore_button.set_sensitive(True)
         except:
             error_title = 'Invalid response'
             error_msg = 'Received an invalid response from the host.\n'
