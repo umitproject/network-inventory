@@ -28,7 +28,9 @@ class HostsViewManager:
 
     def __init__(self, builder, ui_manager):
         self.ui_manager = ui_manager
+        self.ni_notebook = ui_manager.ni_notebook
         self.hosts = None
+        self.hostname = None
         self.ips = None
         self.initing_toggle_buttons_mode = False
         self.active_widget = None
@@ -39,11 +41,18 @@ class HostsViewManager:
         self.buttons_container = builder.get_object('buttons_container')
         self.widget_container = builder.get_object('widget_container')
         self.host_label = builder.get_object('host_label')
-        
+
+        # Check if the current page is focused
+        current_page_index = self.ni_notebook.get_current_page()
+        current_page = self.ni_notebook.get_nth_page(current_page_index)
+        self.focused = current_page == self.hosts_view
+
         # Connect the handlers
         self.hosts_tree_view.connect('row-activated',\
                 self.on_hosts_tree_view_row_activated)
-
+        self.ui_manager.ni_notebook.connect('switch-page',\
+                                            self.on_notebook_page_switch)
+        
         # Init the hosts tree view
         self._init_hosts_tree_view()
 
@@ -51,6 +60,7 @@ class HostsViewManager:
         self.host_details_views = dict()
         self.active_host_detail_view = None
         self.toggle_buttons = list()
+        self.host_selected = False
 
 
     def _init_hosts_tree_view(self):
@@ -141,24 +151,43 @@ class HostsViewManager:
                                  self.MODEL_COL_HOSTNAME, str(self.hosts[i]))
 
 
+    def on_notebook_page_switch(self, notebook, page, page_num):
+        current_page = notebook.get_nth_page(page_num)
+        if current_page != self.hosts_view and self.focused:
+            self.focused = False
+            if self.active_host_detail_view is not None:
+                host_view = self.host_details_views[self.active_host_detail_view]
+                host_view.set_host(None)
+        if current_page == self.hosts_view:
+            self.focused = True
+            if self.active_host_detail_view is not None and\
+               self.hostname is not None:
+                host_view = self.host_details_views[self.active_host_detail_view]
+                host_view.set_host(self.hostname)
+
+
+
     def on_hosts_tree_view_row_activated(self, treeview, path, view_column):
         model = treeview.get_model()
         iter = model.get_iter(path)
 
         hostname = model.get_value(iter, self.MODEL_COL_HOSTNAME)
+        self.hostname = hostname
         host_view = self.host_details_views[self.active_host_detail_view]
-        host_view.set_host(hostname)
         self.host_label.set_markup('<b>%s detail options:</b>' % hostname)
 
-        if self.active_widget is None:
-            # Clean the children (should be the initial label)
-            children = self.widget_container.get_children()
-            for child in children:
-                self.widget_container.remove(child)
+        # Clean the children (should be the initial label)
+        children = self.widget_container.get_children()
+        for child in children:
+            self.widget_container.remove(child)
 
-            # Add the new widget
-            self.active_widget = host_view.get_widget()
-            self.widget_container.add(self.active_widget)
+        host_view.set_host(hostname)
+
+        # Add the new widget
+        self.active_widget = host_view.get_widget()
+        self.widget_container.add(self.active_widget)
+        self.active_widget.show()
+        self.host_selected = True
 
 
     def on_host_detail_view_button_toggled(self, view_button):
@@ -175,19 +204,29 @@ class HostsViewManager:
             return
 
         if active and button_text != self.active_host_detail_view:
+            if self.active_host_detail_view is not None:
+                host_view = self.host_details_views[self.active_host_detail_view]
+                host_view.set_host(None)
+    
             self.active_host_detail_view = button_text
             for toggle_button in self.toggle_buttons:
                 if toggle_button == view_button:
                     continue
                 toggle_button.set_active(False)
 
-            self.widget_container.remove(self.active_widget)
+            if not self.host_selected:
+                return
+
             if self.active_widget is not None:
+                self.widget_container.remove(self.active_widget)
                 self.active_widget.hide()
                 self.active_widget.unparent()
-            self.active_widget = self.host_details_views[button_text].get_name()
+            self.host_details_views[button_text].set_host(self.hostname)
+            self.active_widget = self.host_details_views[button_text].get_widget()
+
             self.widget_container.add(self.active_widget)
-            
+            self.active_widget.show()
+
 
 
 class AbstractHostsView:
@@ -215,5 +254,3 @@ class AbstractHostsView:
         None when the widget is focused out.
         """
         pass
-
-

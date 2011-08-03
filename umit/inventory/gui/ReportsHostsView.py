@@ -30,10 +30,11 @@ class ReportsHostsView(AbstractHostsView):
 
     MODEL_COL_TIME = 0
     MODEL_COL_DESCRIPTION = 1
-    
+
     def __init__(self, ui_manager):
         self.ui_manager = ui_manager
         self.model = None
+        self.notifications_list = None
         self.hostname = None
         self.search_id = None
         self.start_time = None
@@ -42,6 +43,8 @@ class ReportsHostsView(AbstractHostsView):
         self.time_picker_manager = TimePickerManager(self.ui_manager,\
                 ['start_time', 'end_time'], ui_manager.main_window)
 
+
+    def _build_objects(self):
         # Get the objects
         builder = gtk.Builder()
         file_name = self.ui_manager.glade_files['reports_hosts']
@@ -60,6 +63,11 @@ class ReportsHostsView(AbstractHostsView):
 
         self._init_reports_tree_view()
         self._init_handlers()
+
+        # In case we received the notifications list before we reached this step
+        if self.notifications_list is not None:
+            self._populate_results(self.notifications_list)
+            self.notifications_list = None
 
 
     def _init_reports_tree_view(self):
@@ -170,25 +178,25 @@ class ReportsHostsView(AbstractHostsView):
 
 
     def get_widget(self):
+        self._build_objects()
+        self._init_host_values()
         return self.reports_view
 
 
     def set_host(self, hostname):
-        # Query the Server database for reports for this host
+        self.model = None
+        self.notifications_list = None
         self.hostname = hostname
-        self.model.clear()
 
-        # Clear the description text view
-        buffer = self.report_text_view.get_buffer()
-        buffer.set_text('')
 
+    def _init_host_values(self):
         # If we have an active search, stop it
         if self.search_id is not None:
             self.ui_manager.shell.stop_search(self.search_id)
             self.search_id = None
 
         # If we shouldn't show any data
-        if hostname is None:
+        if self.hostname is None:
             return
 
         # Only interested in the description and timestamp fields
@@ -199,7 +207,7 @@ class ReportsHostsView(AbstractHostsView):
 
         # Conditions to show the events
         spec = dict()
-        spec['hostname'] = {'$in' : [hostname.strip()]}
+        spec['hostname'] = {'$in' : [self.hostname.strip()]}
         spec['is_report'] = {'$ne' : False}
 
         if self.start_time or self.end_time:
@@ -229,10 +237,14 @@ class ReportsHostsView(AbstractHostsView):
         else:
             self.next_button.set_sensitive(False)
 
-        self._populate_results(notifications_list)
+        if self.model is None:
+            self.notifications_list = notifications_list
+        else:
+            self.notifications_list = None
+            self._populate_results(notifications_list)
 
 
-    def search_next_callback_function(self, notifications_list=None,\
+    def search_next_callback_function(self, notifications_list=None,
             search_id=None, count=0, position=0, failed=False):
         if failed:
             self.ui_manager.show_run_state_error("", "Report fetching failed")

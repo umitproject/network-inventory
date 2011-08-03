@@ -55,6 +55,8 @@ ni_email_config_file = os.path.join(glade_files_path,\
                                     'ni_email_config.glade')
 ni_agent_config_file = os.path.join(glade_files_path,\
                                     'ni_agents_config.glade')
+ni_device_sensor_host_view = os.path.join(glade_files_path,\
+                                          'ni_device_sensor_host_view.glade')
 
 
 class NIUIManager(gobject.GObject):
@@ -103,6 +105,7 @@ class NIUIManager(gobject.GObject):
         'server_config' : ni_server_config_file,\
         'email_config' : ni_email_config_file,\
         'agent_config' : ni_agent_config_file,\
+        'device_sensor_hosts' : ni_device_sensor_host_view,\
     }
 
 
