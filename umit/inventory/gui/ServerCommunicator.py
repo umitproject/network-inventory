@@ -386,7 +386,7 @@ class Request:
         self.target = target
         self.body = body
         self.request_id = self.last_sent_req_id
-        self.last_sent_req_id += 1
+        Request.last_sent_req_id += 1
 
 
     def serialize(self):

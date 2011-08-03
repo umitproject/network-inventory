@@ -68,7 +68,17 @@ class NIShell:
 
     # General functionality
 
+    def register_async_handler(self, async_type, async_handler):
+        """
+        Used to register async response types to a given handler.
+        The handler must be a function taking only one argument: the body of
+        the response.
+        """
+        self.core.register_async_handler(async_type, async_handler)
+
+
     def send_request(self, request):
+        print 'sending request ...'
         self.communicator.send_request(request)
 
 

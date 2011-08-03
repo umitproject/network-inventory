@@ -40,6 +40,10 @@ class NICore(GObject):
 
     def __init__(self, configurations):
         GObject.__init__(self)
+        
+        # Mapping async types to their handlers
+        self.registered_async_handlers = dict()
+
         self.conf = configurations
         self.server_communicator = NIServerCommunicator(self, configurations)
         self.shell = NIShell(self)
@@ -53,7 +57,6 @@ class NICore(GObject):
 
         self.logged_in = False
         self.network_message_recv = False
-        
 
 
     def _load_modules(self):
@@ -75,6 +78,15 @@ class NICore(GObject):
 
             self.modules[module_name] = module_obj
 
+        for module in self.modules.values():
+            # Add the module host views
+            host_views = module.get_host_views()
+            for host_view in host_views:
+                self.ui_manager.hosts_view_manager.add_host_detail_view(host_view)
+
+            # Add the notebook pages
+            module.add_notebook_page(self.ui_manager.ni_notebook)
+
 
 
     def _init_handlers(self):
@@ -90,6 +102,10 @@ class NICore(GObject):
         gtk.main()
 
 
+    def register_async_handler(self, async_type, async_handler):
+        self.registered_async_handlers[async_type] = async_handler
+
+
     def handle_async_message(self, msg):
         try:
             response_type = msg['response_type']
@@ -100,6 +116,12 @@ class NICore(GObject):
 
         if response_type == 'SUBSCRIBE_RESPONSE':
             self.ui_manager.add_events_view_notification(body)
+            return
+        
+        try:
+            self.registered_async_handlers[response_type](body)
+        except:
+            traceback.print_exc()
 
 
     def set_configs(self, configs=dict(), failed=False):
