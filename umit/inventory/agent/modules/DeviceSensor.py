@@ -25,12 +25,14 @@ import json
 import re
 import psutil
 import logging
+import platform
 from socket import gethostname
 from collections import deque
 from threading import Thread
 from threading import Lock
 
 from umit.inventory.agent.MonitoringModule import MonitoringModule
+from umit.inventory.agent.Core import AgentNotificationParser
 from umit.inventory.common import NotificationTypes
 
 
@@ -89,6 +91,14 @@ class DeviceSensor(MonitoringModule):
         self.activated = False
         self.activation_request = False
         self.deactivation_request = False
+
+        self.command_handlers = {
+            'REAL_TIME_REQUEST' : self.handle_real_time_request,
+            'GET_NOTIFICATION_COND' : self.handle_get_notification_cond,
+            'SET_NOTIFICATION_COND' : self.handle_set_notification_cond,
+            'GET_REPORT_TEMPLATE' : self.handle_get_report_template,
+            'SET_REPORT_TEMPLATE' : self.handle_set_report_template,
+        }
 
 
     def get_name(self):
@@ -183,6 +193,47 @@ class DeviceSensor(MonitoringModule):
         """ Called each self.test_time seconds to measure device info """
         self.measurement_manager.update()
         self.trackers_manager.update()
+
+
+    def handle_command(self, command, command_id, command_body,
+                       command_connection):
+        logging.debug('DeviceSensor: Handling command: %s', str(command))
+        try:
+            self.command_handlers[command](command_id, command_body,
+                                           command_connection)
+        except:
+            logging.debug('DeviceSensor: Invalid command name', exc_info=True)
+
+
+    def handle_real_time_request(self, command_id, command_body,
+                                 command_connection):
+        real_time_command_handler = RealTimeCommandHandler(command_id,\
+                command_connection, self.measurement_manager)
+        real_time_command_handler.start()
+
+
+    def handle_get_notification_cond(self, command_id, command_body,
+                                     command_connection):
+        command_connection.shutdown()
+        #TODO
+
+
+    def handle_set_notification_cond(self, command_id, command_body,
+                                     command_connection):
+        command_connection.shutdown()
+        #TODO
+
+
+    def handle_get_report_template(self, command_id, command_body,
+                                 command_connection):
+        command_connection.shutdown()
+        #TODO
+    
+
+    def handle_set_report_template(self, command_id, command_body,
+                                   command_connection):
+        command_connection.shutdown()
+        #TODO
 
 
 
@@ -1240,7 +1291,7 @@ class PartitionAvailableGenerator(MeasurementGenerator):
             return
         if WIN:
             self.measure_windows()
-        if UNIX:
+        if POSIX:
             self.measure_unix()
 
     def measure_unix(self):
@@ -1914,3 +1965,155 @@ class InvalidVariableName(Exception):
 
     def __str__(self):
         return repr(self.err_msg)
+
+
+
+class RealTimeCommandHandler(Thread):
+    """
+    Sends real-time command responses to the server. Fields:
+    * cpu: The (real) name of the CPU.
+    * ram: The total size in bytes of the RAM.
+    * os: The os id. one of the following values:
+      - 'windows'
+      - 'linux'
+      - 'freebsd'
+      - 'openbsd'
+      - 'mac'
+      - 'other'
+    * cpu_percent: The percent of the CPU used (0.0 - 1.0 range).
+    * ram_percent: The percent of the RAM used (0.0 - 1.0 range).
+    * recv_bytes: The number of received bytes over the last second.
+    * sent_bytes: The number of sent bytes over the last second.
+
+    Note: All fields are optional.
+    """
+    sleep_time = 1.0
+
+    def __init__(self, command_id, command_connection, measurement_manager):
+        Thread.__init__(self)
+        self.daemon = True
+
+        self.command_id = command_id
+        self.command_connection = command_connection
+        self.measurement_manager = measurement_manager
+
+        # Initialize the measurements
+        self.measurement_manager.add_measurement('cpu_percent')
+        self.measurement_manager.add_measurement('ram_percent')
+        self.measurement_manager.add_measurement('net_recv_bps')
+        self.measurement_manager.add_measurement('net_sent_bps')
+
+        self.should_shutdown = False
+        self.shutdown_lock = Lock()
+
+        self._get_initial_info()
+
+        self._send_initial_response()
+
+
+    def _get_initial_info(self):
+        # Determine the os id
+        self.os_id = 'other'
+        if sys.platform == 'win32':
+            self.os_id = 'windows'
+        if sys.platform.startswith('linux'):
+            self.os_id = 'linux'
+        if sys.platform.startswith('freebsd'):
+            self.os_id = 'freebsd'
+        if sys.platform.startswith('openbsd'):
+            self.os_id = 'openbsd'
+        if sys.platform in ['darwin', 'mac']:
+            self.os_id = 'mac'
+
+        # Determine the os name
+        self.os_name = str(platform.system()) + ' ' + str(platform.release())
+
+        # Determine the CPU name
+        self.cpu = platform.processor()
+
+        # Determine the RAM size
+        self.ram = psutil.TOTAL_PHYMEM
+
+        # Determine the boot time
+        self.boot_time = psutil.BOOT_TIME
+
+
+    def _send_initial_response(self):
+        response = self._build_response(cpu=self.cpu,
+                                        ram=self.ram,
+                                        os_name=self.os_name,
+                                        os_id=self.os_id,
+                                        boot_time=self.boot_time)
+        sent_ok = self.command_connection.send(response)
+        if not sent_ok:
+            self.shutdown()
+    
+
+    def _build_response(self, cpu=None, ram=None, os_name=None, cpu_percent=None,
+                        ram_percent=None, recv_bps=None, sent_bps=None,
+                        boot_time=None, os_id=None):
+        response_body = dict()
+
+        if cpu_percent is not None:
+            response_body['cpu_percent'] = cpu_percent
+
+        if ram_percent is not None:
+            response_body['ram_percent'] = ram_percent
+
+        if os_name is not None:
+            response_body['os_name'] = os_name
+
+        if ram is not None:
+            response_body['ram'] = ram
+
+        if cpu is not None:
+            response_body['cpu'] = cpu
+
+        if recv_bps is not None:
+            response_body['recv_bps'] = recv_bps
+
+        if sent_bps is not None:
+            response_body['sent_bps'] = sent_bps
+
+        if boot_time is not None:
+            response_body['boot_time'] = boot_time
+
+        if os_id is not None:
+            response_body['os_id'] = os_id
+
+        return AgentNotificationParser.encode_command_response(response_body,
+                'REAL_TIME_REQUEST', self.command_id)
+
+
+    def shutdown(self):
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.command_connection.shutdown()
+        self.shutdown_lock.release()
+
+
+    def run(self):
+        while True:
+            self.shutdown_lock.acquire()
+            if self.should_shutdown:
+                self.shutdown_lock.release()
+                break
+            self.shutdown_lock.release()
+            
+            self.cpu_percent =\
+                self.measurement_manager.get_variable('cpu_percent')
+            self.ram_percent =\
+                self.measurement_manager.get_variable('ram_percent')
+            self.net_recv_bps =\
+                self.measurement_manager.get_variable('net_recv_bps')
+            self.net_sent_bps =\
+                self.measurement_manager.get_variable('net_sent_bps')
+
+            response = self._build_response(cpu_percent=self.cpu_percent,
+                ram_percent=self.ram_percent, recv_bps=self.net_recv_bps,
+                sent_bps=self.net_sent_bps)
+            sent_ok = self.command_connection.send(response)
+            if not sent_ok:
+                self.shutdown()
+
+            time.sleep(self.sleep_time)

@@ -135,6 +135,7 @@ class AgentMainLoop:
     def close_command_connection(self, command_connection):
         """ Called when a command connection was closed """
         self.command_connections_lock.acquire()
+
         try:
             self.command_connections.remove(command_connection)
             for command_id in self.command_id_to_connection.keys():
@@ -142,6 +143,7 @@ class AgentMainLoop:
                     del self.command_id_to_connection[command_id]
         except:
             pass
+
         self.command_connections_lock.release()
 
         
@@ -226,19 +228,34 @@ class AgentMainLoop:
 
     def handle_close_connection(self, command, command_id, body,\
                                 command_connection):
+        logging.debug('Core: Handling close command connection for %s',
+                      str(command_id))
         closed_command_id = body
         
         self.command_connections_lock.acquire()
         try:
+            logging.debug('Core: Found command connection to close.')
             del_command_connection =\
                     self.command_id_to_connection[closed_command_id]
         except:
+            logging.debug('Core: Command connection to close not found')
+            self.command_connections_lock.release()
             return
+        self.command_connections_lock.release()
 
         del_command_connection.shutdown()
-        self.command_connections.remove(del_command_connection)
-        del self.command_id_to_connection[closed_command_id]
+
+        self.command_connections_lock.acquire()
+        try:
+            self.command_connections.remove(del_command_connection)
+        except:
+            pass
+        try:
+            del self.command_id_to_connection[closed_command_id]
+        except:
+            pass
         self.command_connections_lock.release()
+        
         command_connection.shutdown()
         
 
@@ -632,6 +649,7 @@ class CommandListener(threading.Thread):
     def _accept_connections(self):
         if not self.ssl_files_generated:
             return
+        logging.info('Core: Accepting command connections ...')
         conn, addr = self.command_socket.accept()
         peer_host = addr[0]
         peer_port = addr[1]
@@ -716,7 +734,10 @@ class CommandConnection(threading.Thread):
 
 
     def send(self, data):
-        self.data_socket.setblocking(0)
+        try:
+            self.data_socket.setblocking(0)
+        except:
+            return False
         total_sent_b = 0
         data += message_delimiter
         length = len(data)
@@ -735,13 +756,20 @@ class CommandConnection(threading.Thread):
             logging.error('Failed sending command data from %s:%s',\
                           self.peer_host, self.peer_port)
 
-            self.data_socket.setblocking(1)
+            try:
+                self.data_socket.setblocking(1)
+            except:
+                pass
             return False
 
         logging.debug('Sent command response to %s:%s.\n %s',\
                       self.peer_host, self.peer_port, data)
 
-        self.data_socket.setblocking(1)
+        try:
+            self.data_socket.setblocking(1)
+        except:
+            return False
+        
         return True
 
 
@@ -752,7 +780,7 @@ class CommandConnection(threading.Thread):
             logging.warning('Received not JSON-seriazable command from %s:%s',\
                             self.peer_host, self.peer_port)
             return False
-        
+
         # Get authentication data
         try:
             if self.auth_enabled:
@@ -786,6 +814,7 @@ class CommandConnection(threading.Thread):
 
         self.main_loop.handle_command(target, command_name,\
                                       body, command_id, self)
+
         return True
         
     
