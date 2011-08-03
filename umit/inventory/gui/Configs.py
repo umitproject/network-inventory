@@ -60,6 +60,12 @@ class NIConfig(InventoryConfig):
         self.set('ServerModule', InventoryConfig.module_enabled, True)
         self.set('ServerModule', InventoryConfig.is_module, True)
 
+        self.add_section('DeviceSensorModule')
+        self.set('DeviceSensorModule', InventoryConfig.module_path,\
+                os.path.join('umit', 'inventory', 'gui', 'modules'))
+        self.set('DeviceSensorModule', InventoryConfig.module_enabled, True)
+        self.set('DeviceSensorModule', InventoryConfig.is_module, True)
+
 
     def _set_default_config_file(self):
         """Sets the default configuration file"""
