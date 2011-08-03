@@ -984,7 +984,7 @@ class InterfaceDataConnection(Thread):
         """
         # If we did shutdown, we aren't sending messages
         if self.shutdown:
-            return
+            return False
 
         # If it's a real time message, send it right away
         if real_time:
@@ -992,18 +992,18 @@ class InterfaceDataConnection(Thread):
                 err_msg = 'ServerInterface: Trying to send message without '
                 err_msg += ' connected'
                 logging.warning(err_msg)
-                return
+                return False
 
             sent_data = str(json.dumps([message])) + message_delimiter
             if not self._send(sent_data):
                 err_msg = 'ServerInterface: Failed to send message to %s:%s'
                 logging.warning(err_msg, str(self.peer_host),\
                                 str(self.peer_port))
-                return
+                return False
 
             logging.debug('ServerInterface: Sending %s to %s:%s', str(message),\
                           str(self.peer_host), str(self.peer_port))
-            return
+            return True
 
         # Not a real time message
         self.message_queue_lock.acquire()

@@ -104,8 +104,6 @@ class ServerCore:
                 continue
                 
             self.modules[module_name] = module_obj
-            if module_obj.is_enabled():
-                module_obj.activate()
 
         logging.info('Loaded modules')
         
@@ -122,9 +120,12 @@ class ServerCore:
 
         # Init the database operations for each module.
         for module in self.modules.values():
-            if not module.is_enabled():
-                continue
             module.init_database_operations()
+
+        # Activate the modules
+        for module in self.modules.values():
+            if module.is_enabled():
+                module.activate()
 
 
     def update_configs(self, configs):

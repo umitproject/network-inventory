@@ -99,9 +99,7 @@ class AgentListener(ListenerServerModule, ServerModule):
             }
 
         Notification.register_class(AgentNotification)
-
-
-    def activate(self):
+        
         # Generate the SSL key and certificate
         logging.info('AgentListener: Loading SSL support ...')
         self.ssl_enabled = True
@@ -122,6 +120,11 @@ class AgentListener(ListenerServerModule, ServerModule):
 
         # Mapping GET_CONFIG requests to their data_connection
         self.get_configs_map = dict()
+
+
+    def activate(self):
+        # Start the agent tracker
+        self.agent_tracker.start()
 
 
     def _generate_ssl_files(self):
@@ -184,7 +187,6 @@ class AgentListener(ListenerServerModule, ServerModule):
         hosts_list = self.shell.database.get_hosts()
         self.agent_tracker = AgentTracker(self.shell, hosts_list)
         self.command_tracker = AgentCommandTracker(self.agent_tracker)
-        self.agent_tracker.start()
 
         # TODO: delete this after testing is done:
         self.add_user('guest', 'guest')
@@ -492,7 +494,8 @@ class AgentListener(ListenerServerModule, ServerModule):
         data_connection.send_message(json.dumps(response), True)
 
 
-    def get_configs_handler(self, message, command_id, user_data, closed=False):
+    def get_configs_handler(self, message, command_id, user_data,
+                            command_connection, closed=False):
         req_id = user_data
         try:
             data_connection = self.get_configs_map[command_id]
@@ -871,6 +874,8 @@ class AgentCommandTracker:
     def __init__(self, agent_tracker):
         self.agent_tracker = agent_tracker
 
+        self.command_connections = dict()
+
 
     def send_command(self, hostname, target, command_name,\
                      command_body=dict(), handler_function=None,\
@@ -883,12 +888,12 @@ class AgentCommandTracker:
         hostname: The hostname on which the agent is present.
         handler_function: function to be called when a response is received. It
         should have the definition handler_function(message, command_id,\
-        handler_user_data, closed=False) and it should return True if more
-        responses are accepted, False otherwise.
+        handler_user_data, command_connection, closed=False) and it should
+        return True if more responses are accepted, False otherwise.
 
         Returns a positive integer representing the command id, or -1 on failure.
         """
-        logging.debug('AgentListener: Trying to send a command [%s:%s] to %s...',\
+        logging.debug('AgentListener: Trying to send a command [%s:%s] to %s...',
                       target, command_name, hostname)
         
         # Get the host information
@@ -938,8 +943,18 @@ class AgentCommandTracker:
         else:
             command_connection.shutdown()
 
-        logging.debug('AgentListener: Command sent succesfully.')
+        logging.debug('AgentListener: Command sent succesfully. Body:\n%s',
+                      str(command))
         return command_id
+
+
+    def close_command_connection(self, hostname, command_id):
+        """
+        Should only be used when closing an async command connection.
+        For a synchronous one (the number of expected responses is known)
+        just use command_connection.shutdown().
+        """
+        self.send_command(hostname, 'GENERAL', 'CLOSE_CONNECTION', command_id)
 
 
 
@@ -968,9 +983,13 @@ class AgentCommandConnection(Thread):
     def _connect(self):
         self.data_socket = socket.socket()
         self.data_socket = ssl.wrap_socket(self.data_socket)
+        logging.info('AgentListener: Trying to connect for commands to %s:%s',
+                     str(self.peer_ip), str(self.peer_port))
         try:
             self.data_socket.connect((self.peer_ip, self.peer_port))
             self.connected = True
+            logging.info('AgentListener: Connected for commands to %s:%s',
+                         str(self.peer_ip), str(self.peer_port))
         except:
             err_msg = "AgentListener: Failed to connect for commands to %s:%s"
             logging.warning(err_msg, str(self.peer_ip), str(self.peer_port),\
@@ -1010,7 +1029,10 @@ class AgentCommandConnection(Thread):
 
 
     def send_command(self, data):
-        self.data_socket.setblocking(0)
+        try:
+            self.data_socket.setblocking(0)
+        except:
+            return False
         total_sent_b = 0
         data += message_delimiter
         length = len(data)
@@ -1029,10 +1051,16 @@ class AgentCommandConnection(Thread):
             logging.error('Failed sending command data from %s:%s',\
                           str(self.peer_ip), str(self.peer_port))
 
-            self.data_socket.setblocking(1)
+            try:
+                self.data_socket.setblocking(1)
+            except:
+                pass
             return False
 
-        self.data_socket.setblocking(1)
+        try:
+            self.data_socket.setblocking(1)
+        except:
+            return False
         return True
 
 
@@ -1048,8 +1076,8 @@ class AgentCommandConnection(Thread):
 
     def run(self):
         if not self.connected:
-            self.handler_function(None, self.command_id,\
-                                  self.handler_user_data, closed=True)
+            self.handler_function(None, self.command_id,
+                                  self.handler_user_data, self, closed=True)
             return
 
         while True:
@@ -1062,12 +1090,12 @@ class AgentCommandConnection(Thread):
             message = self._recv()
 
             if message is None:
-                self.handler_function(None, self.command_id,\
-                                      self.handler_user_data, closed=True)
+                self.handler_function(None, self.command_id,
+                                      self.handler_user_data, self, closed=True)
                 self.shutdown()
                 break
-            if not self.handler_function(message, self.command_id,\
-                                         self.handler_user_data):
+            if not self.handler_function(message, self.command_id,
+                                         self.handler_user_data, self):
                 self.shutdown()
                 break
 
