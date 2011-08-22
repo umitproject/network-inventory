@@ -134,10 +134,10 @@ class EMailNotifierModule(Module):
 
     def _init_config_values(self):
         self.enable_cb.set_active(self.enabled)
-        self.username_entry.set_text(self.username)
-        self.password_entry.set_text(self.password)
-        self.host_entry.set_text(self.host)
-        self.port_entry.set_text(self.port)
+        self.username_entry.set_text(str(self.username))
+        self.password_entry.set_text(str(self.password))
+        self.host_entry.set_text(str(self.host))
+        self.port_entry.set_text(str(self.port))
         self.ssl_cb.set_active(bool(self.ssl))
         self.tls_cb.set_active(bool(self.tls))
         for event_type in self.type_to_cb_map.keys():
