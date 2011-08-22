@@ -21,26 +21,30 @@ import time
 import os
 import random
 
-log_level_dict = {'warning' : logging.WARNING,\
-                  'info' : logging.INFO,\
-                  'critical' : logging.CRITICAL,\
-                  'debug' : logging.DEBUG,\
-                  'error' : logging.ERROR,\
+log_level_dict = {'warning' : logging.WARNING,
+                  'info' : logging.INFO,
+                  'critical' : logging.CRITICAL,
+                  'debug' : logging.DEBUG,
+                  'error' : logging.ERROR,
                   }
 
 from umit.inventory.Configuration import InventoryConfig
 
-def init_logger(configs, log_to_console=False):
+def init_logger(configs, log_level=None, log_to_console=False):
     """
     configs: An InventoryConfig object which is used to determine the log path.
     l: The log level. See logging module.
     """
     try:
-        log_path = str(configs.get(InventoryConfig.general_section,\
+        log_path = str(configs.get(InventoryConfig.general_section,
                 InventoryConfig.log_path))
 
-        l = configs.get(InventoryConfig.general_section,\
-                        InventoryConfig.log_level)
+        if log_level is None:
+            l = configs.get(InventoryConfig.general_section,
+                            InventoryConfig.log_level)
+        else:
+            l = log_level
+
         try:
             l = log_level_dict[l]
         except:
@@ -63,13 +67,15 @@ def init_logger(configs, log_to_console=False):
     f_name = str(int(time.time())) + str(int(random.random() * 10000)) + '.log'
     full_path = os.path.join(log_path, f_name)
 
-    # Config the logger
-    logging.basicConfig(\
-        filename=full_path,
-        filemode='w',
-        format=get_format(l),\
-        level=l)
+    # Config the logger with the file handler
+    fh = logging.FileHandler(full_path, mode='w')
+    formatter = logging.Formatter(get_format(l))
+    fh.setFormatter(formatter)
+    logger = logging.getLogger()
+    logger.addHandler(fh)
+    logger.setLevel(l)
 
+    # If configured, also log to console
     if log_to_console:
         ch = logging.StreamHandler()
         formatter = logging.Formatter(get_format(l))
