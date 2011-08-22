@@ -21,13 +21,6 @@ import gtk
 import gobject
 import os
 
-#TODO refactoring paths
-pixbuf_paths = os.path.join('umit', 'inventory', 'gui', 'pixmaps')
-server_logo = os.path.join(pixbuf_paths, 'server_config.png')
-agent_logo = os.path.join(pixbuf_paths, 'agent_config.png')
-mail_logo = os.path.join(pixbuf_paths, 'mail_config.png')
-
-
 class ConfigurationWindowManager:
 
     SECTIONS_MODEL_COL_PIXBUF = 0
@@ -41,12 +34,12 @@ class ConfigurationWindowManager:
 
 
     def _init_model(self):
-        self.sections_model = gtk.ListStore(gobject.TYPE_OBJECT,\
+        self.sections_model = gtk.ListStore(gobject.TYPE_OBJECT,
                 gobject.TYPE_STRING, gobject.TYPE_OBJECT)
 
 
     def _build_objects(self):
-        glade_file_name = self.ui_manager.glade_files['config_window']
+        glade_file_name = self.ui_manager.get_glade_file_path('ni_config_window.glade')
         builder = gtk.Builder()
         builder.add_from_file(glade_file_name)
         self.config_window = builder.get_object('config_window')
@@ -58,9 +51,9 @@ class ConfigurationWindowManager:
 
     def add_config_page(self, pixbuf, text, widget):
         iter = self.sections_model.append()
-        self.sections_model.set(iter,\
-                                self.SECTIONS_MODEL_COL_TEXT, text,\
-                                self.SECTIONS_MODEL_COL_PIXBUF, pixbuf,\
+        self.sections_model.set(iter,
+                                self.SECTIONS_MODEL_COL_TEXT, text,
+                                self.SECTIONS_MODEL_COL_PIXBUF, pixbuf,
                                 self.SECTIONS_MODEL_COL_WIDGET, widget)
         
 
@@ -80,7 +73,7 @@ class ConfigurationWindowManager:
 
     def _init_handlers(self):
         self.close_button.connect('clicked', self.on_close_button_clicked)
-        self.sections_tree_view.connect('cursor-changed',\
+        self.sections_tree_view.connect('cursor-changed',
                 self.on_sections_tree_view_cursor_changed)
         self.config_window.connect('destroy', self.on_config_window_destroyed)
 
@@ -103,8 +96,8 @@ class ConfigurationWindowManager:
         if self.config_window is None:
             return
 
-        error_dialog = gtk.MessageDialog(parent=self.config_window,\
-                                         type=gtk.MESSAGE_ERROR,\
+        error_dialog = gtk.MessageDialog(parent=self.config_window,
+                                         type=gtk.MESSAGE_ERROR,
                                          buttons=gtk.BUTTONS_OK)
         icon = self.config_window.get_icon()
         error_dialog.set_icon(icon)
@@ -136,7 +129,7 @@ class ConfigurationWindowManager:
         path, focus_column = tree_view.get_cursor()
         iter = self.sections_model.get_iter(path)
         
-        widget = self.sections_model.get_value(iter,\
+        widget = self.sections_model.get_value(iter,
                                                self.SECTIONS_MODEL_COL_WIDGET)
 
         # Clear the container
@@ -228,7 +221,7 @@ class ConfigCellRenderer(gtk.CellRenderer):
         return xoffset, yoffset, width, height
 
 
-    def do_render(self, window, widget, background_area, cell_area,\
+    def do_render(self, window, widget, background_area, cell_area,
                expose_area, flags):
         text_xoff, text_yoff, text_w, text_h =\
                 self.text_renderer.get_size(widget, cell_area)
@@ -256,9 +249,9 @@ class ConfigCellRenderer(gtk.CellRenderer):
         pixbuf_area = gtk.gdk.Rectangle(pixbuf_x, pixbuf_y, pixbuf_w, pixbuf_h)
         text_area = gtk.gdk.Rectangle(text_x, text_y, text_w, text_h)
 
-        self.text_renderer.render(window, widget, background_area, text_area,\
+        self.text_renderer.render(window, widget, background_area, text_area,
                expose_area, flags)
-        self.pixbuf_renderer.render(window, widget, background_area,\
+        self.pixbuf_renderer.render(window, widget, background_area,
                 pixbuf_area, expose_area, flags)
 
 gobject.type_register(ConfigCellRenderer)

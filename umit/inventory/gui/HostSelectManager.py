@@ -28,7 +28,8 @@ class HostSelectManager:
 
         
     def _build_objects(self):
-        glade_file_name = self.ui_manager.glade_files['host_select']
+        glade_file_name =\
+            self.ui_manager.get_glade_file_path('ni_host_select.glade')
         builder = gtk.Builder()
         builder.add_from_file(glade_file_name)
 

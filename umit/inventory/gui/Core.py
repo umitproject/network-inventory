@@ -38,8 +38,9 @@ gtk.gdk.threads_init()
 class NICore(GObject):
     """ Network Inventory GUI Core """
 
-    def __init__(self, configurations):
+    def __init__(self, configurations, data_dir):
         GObject.__init__(self)
+        self.data_dir = data_dir
         
         # Mapping async types to their handlers
         self.registered_async_handlers = dict()
@@ -60,23 +61,11 @@ class NICore(GObject):
 
 
     def _load_modules(self):
-        modules_names = self.conf.get_modules_list()
-
-        for module_name in modules_names:
-            if not self.conf.module_get_enable(module_name):
-                continue
-        
-            try:
-                module_path = self.conf.module_get_option(module_name,\
-                        NIConfig.module_path)
-                module_obj = umit.inventory.common.load_module(module_name,\
-                        module_path, self.ui_manager, self.shell)
-
-            except Exception, e:
-                traceback.print_exc()
-                continue
-
-            self.modules[module_name] = module_obj
+        modules_objects =\
+            umit.inventory.common.load_modules_from_target('gui',
+                self.ui_manager, self.shell)
+        for module_object in modules_objects:
+            self.modules[module_object.__class__.__name__] = module_object
 
         for module in self.modules.values():
             # Add the module host views
@@ -86,7 +75,6 @@ class NICore(GObject):
 
             # Add the notebook pages
             module.add_notebook_page(self.ui_manager.ni_notebook)
-
 
 
     def _init_handlers(self):
@@ -147,18 +135,18 @@ class NICore(GObject):
         self.permissions = permissions
         gobject.idle_add(self.ui_manager.set_protocols, protocols)
         gobject.idle_add(self.ui_manager.set_run_state)
-        gobject.idle_add(self.server_communicator.send_request,\
+        gobject.idle_add(self.server_communicator.send_request,
             SubscribeRequest(self.username, self.password))
-        gobject.idle_add(self.server_communicator.send_request,\
+        gobject.idle_add(self.server_communicator.send_request,
             GetHostsRequest(self.username, self.password, self))
-        gobject.idle_add(self.server_communicator.send_request,\
+        gobject.idle_add(self.server_communicator.send_request,
             GetConfigsRequest(self.username, self.password, self))
         gobject.idle_add(self.shell.set_user_data, self.username, self.password)
         
         self.conf.set_general_option(NIConfig.ni_server_username, self.username)
         self.conf.set_general_option(NIConfig.ni_server_host, self.host)
         self.conf.set_general_option(NIConfig.ni_server_port, self.port)
-        self.conf.set_general_option(NIConfig.ni_server_enable_ssl,\
+        self.conf.set_general_option(NIConfig.ni_server_enable_ssl,
                                      self.ssl_enabled)
         self.conf.save_settings()
 
@@ -166,7 +154,7 @@ class NICore(GObject):
     def set_connection_failed(self):
         msg = 'Fatal Error: Connection closed by the Notifications Server'
         second_title = 'Shutting Down'
-        gobject.idle_add(self.ui_manager.show_run_state_error, msg,\
+        gobject.idle_add(self.ui_manager.show_run_state_error, msg,
                          second_title, True)
 
 

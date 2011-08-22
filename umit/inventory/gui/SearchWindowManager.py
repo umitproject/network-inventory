@@ -75,7 +75,7 @@ class SearchWindowManager:
         self.parent_window = parent_window
         self.window_shown = True
         builder = gtk.Builder()
-        file_name = self.ui_manager.glade_files['search_window']
+        file_name = self.ui_manager.get_glade_file_path('ni_search_window.glade')
         self.search_window = builder.add_from_file(file_name)
         self._build_objects(builder)
         self.search_window.set_transient_for(parent_window)

@@ -37,31 +37,31 @@ class NIConfig(InventoryConfig):
     
         # Module default settings
         self.add_section('SNMPModule')
-        self.set('SNMPModule', InventoryConfig.module_path,\
+        self.set('SNMPModule', InventoryConfig.module_path,
                 os.path.join('umit', 'inventory', 'gui', 'modules'))
         self.set('SNMPModule', InventoryConfig.module_enabled, True)
         self.set('SNMPModule', InventoryConfig.is_module, True)
 
         self.add_section('UmitAgentModule')
-        self.set('UmitAgentModule', InventoryConfig.module_path,\
+        self.set('UmitAgentModule', InventoryConfig.module_path,
                 os.path.join('umit', 'inventory', 'gui', 'modules'))
         self.set('UmitAgentModule', InventoryConfig.module_enabled, True)
         self.set('UmitAgentModule', InventoryConfig.is_module, True)
 
         self.add_section('EMailNotifierModule')
-        self.set('EMailNotifierModule', InventoryConfig.module_path,\
+        self.set('EMailNotifierModule', InventoryConfig.module_path,
                 os.path.join('umit', 'inventory', 'gui', 'modules'))
         self.set('EMailNotifierModule', InventoryConfig.module_enabled, True)
         self.set('EMailNotifierModule', InventoryConfig.is_module, True)
 
         self.add_section('ServerModule')
-        self.set('ServerModule', InventoryConfig.module_path,\
+        self.set('ServerModule', InventoryConfig.module_path,
                 os.path.join('umit', 'inventory', 'gui', 'modules'))
         self.set('ServerModule', InventoryConfig.module_enabled, True)
         self.set('ServerModule', InventoryConfig.is_module, True)
 
         self.add_section('DeviceSensorModule')
-        self.set('DeviceSensorModule', InventoryConfig.module_path,\
+        self.set('DeviceSensorModule', InventoryConfig.module_path,
                 os.path.join('umit', 'inventory', 'gui', 'modules'))
         self.set('DeviceSensorModule', InventoryConfig.module_enabled, True)
         self.set('DeviceSensorModule', InventoryConfig.is_module, True)
@@ -73,6 +73,8 @@ class NIConfig(InventoryConfig):
 
 
     def _get_default_log_path(self):
+        if hasattr(self, 'default_log_path'):
+            return self.default_log_path
         if os.name == 'posix':
             return os.path.abspath('/var/log/umit-ni-gui/')
         else:

@@ -34,7 +34,7 @@ class SearchResultsManager:
         self.page_size = 0
 
 
-    def show_results(self, notifications_list, search_id=None,\
+    def show_results(self, notifications_list, search_id=None,
                      count=0):
         try:
             self.current_page_len = len(notifications_list)
@@ -55,7 +55,8 @@ class SearchResultsManager:
 
     def _build_objects(self):
         builder = gtk.Builder()
-        file_name = self.ui_manager.glade_files['search_results']
+        file_name =\
+            self.ui_manager.get_glade_file_path('ni_search_results_window.glade')
         builder.add_from_file(file_name)
         self.results_window = builder.get_object('search_results_window')
         self.status_label = builder.get_object('status_label')

@@ -62,7 +62,8 @@ class TimePickerManager(gobject.GObject):
 
         # Build the objects
         builder = gtk.Builder()
-        file_name = self.ui_manager.glade_files['time_picker']
+        file_name =\
+            self.ui_manager.get_glade_file_path('ni_time_date_picker.glade')
         builder.add_from_file(file_name)
         self.time_popup = builder.get_object('time_date_popup')
         self.date_calendar = builder.get_object('date_calendar')

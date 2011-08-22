@@ -28,9 +28,9 @@ from umit.inventory.gui.SearchWindowManager import SearchWindowManager
 
 class EventsViewManager(gobject.GObject):
 
-    events_shown_options = {'Most Recent 25' : 25,\
-                            'Most Recent 50' : 50,\
-                            'Most Recent 75' : 75,\
+    events_shown_options = {'Most Recent 25' : 25,
+                            'Most Recent 50' : 50,
+                            'Most Recent 75' : 75,
                             'Most Recent 100' : 100}
 
     ALL_PROTOCOLS_SHOWN = 'All'
@@ -60,17 +60,17 @@ class EventsViewManager(gobject.GObject):
         self.unknown_cb = builder.get_object('unknown_checkbox')
 
         # For faster checking/unchecking
-        self.cb_list = [self.info_cb, self.recovery_cb, self.warning_cb,\
+        self.cb_list = [self.info_cb, self.recovery_cb, self.warning_cb,
                         self.security_cb, self.critical_cb, self.unknown_cb]
-        self.cb_map = {NotificationTypes.info : self.info_cb,\
-                       NotificationTypes.warning : self.warning_cb,\
-                       NotificationTypes.recovery : self.recovery_cb,\
-                       NotificationTypes.security : self.security_cb,\
-                       NotificationTypes.critical : self.critical_cb,\
+        self.cb_map = {NotificationTypes.info : self.info_cb,
+                       NotificationTypes.warning : self.warning_cb,
+                       NotificationTypes.recovery : self.recovery_cb,
+                       NotificationTypes.security : self.security_cb,
+                       NotificationTypes.critical : self.critical_cb,
                        NotificationTypes.unknown : self.unknown_cb}
 
         # The widget where the events will be shown
-        self.events_widget = EventsViewWidget(self.ui_manager,\
+        self.events_widget = EventsViewWidget(self.ui_manager,
                 self.tree_model_visible_func, self)
         self.events_widget_container.add(self.events_widget)
         self.events_widget.show()
@@ -83,6 +83,10 @@ class EventsViewManager(gobject.GObject):
 
         self.init_events_shown()
         self.init_handlers()
+
+
+    def set_receive_events(self, receive_events):
+        self.receive_events_button.set_active(receive_events)
 
 
     def init_events_shown(self):
@@ -162,11 +166,11 @@ class EventsViewManager(gobject.GObject):
 
 
     def init_handlers(self):
-        self.find_events_button.connect('clicked',\
+        self.find_events_button.connect('clicked',
                 self.on_find_events_button_clicked)
-        self.receive_events_button.connect('toggled',\
+        self.receive_events_button.connect('toggled',
                 self.on_receive_events_button_toggled)
-        self.filter_button.connect('clicked',\
+        self.filter_button.connect('clicked',
                 self.on_filter_button_clicked)
         self.all_cb.connect('toggled', self.on_all_cb_toggled)
         self.info_cb.connect('toggled', self.on_not_all_cb_toggled)
@@ -190,7 +194,7 @@ class EventsViewManager(gobject.GObject):
 
     def on_receive_events_button_toggled(self, receive_events_button):
         if receive_events_button.get_active():
-            self.ui_manager.emit('subscribe', self.protocol_shown,\
+            self.ui_manager.emit('subscribe', self.protocol_shown,
                                  self.hosts_shown, self.types_shown)
         else:
             self.ui_manager.emit('unsubscribe')
@@ -219,7 +223,7 @@ class EventsViewManager(gobject.GObject):
 
         self.events_widget.refilter()
 
-        self.ui_manager.emit('subscribe', self.protocol_shown,\
+        self.ui_manager.emit('subscribe', self.protocol_shown,
                              self.hosts_shown, self.types_shown)
 
 

@@ -40,14 +40,14 @@ class ReportsHostsView(AbstractHostsView):
         self.start_time = None
         self.end_time = None
 
-        self.time_picker_manager = TimePickerManager(self.ui_manager,\
+        self.time_picker_manager = TimePickerManager(self.ui_manager,
                 ['start_time', 'end_time'], ui_manager.main_window)
 
 
     def _build_objects(self):
         # Get the objects
         builder = gtk.Builder()
-        file_name = self.ui_manager.glade_files['reports_hosts']
+        file_name = self.ui_manager.get_glade_file_path('ni_reports_hosts_view.glade')
         builder.add_from_file(file_name)
         self.reports_view = builder.get_object('reports_hosts_view_top')
         self.reports_view.unparent()
