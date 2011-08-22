@@ -19,12 +19,14 @@
 
 import sys
 import os
+import logging
 
-if "." not in sys.path:
-    sys.path.append(".")
+if not os.getcwd() in sys.path:
+    sys.path.append(os.getcwd())
 
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.server.Core import ServerCore
+from umit.inventory.Configuration import InventoryConfig
 from umit.inventory import Logger
 from umit.inventory.paths import CONFIG_DIR, SERVER_MISC_DIR
 
@@ -80,11 +82,6 @@ if admin_password is not None and install_daemon:
 if data_dir is None and debug_mode:
     data_dir = '.'
 
-# Get the config file path
-conf_path = None
-if data_dir is not None:
-    conf_path = os.path.join(data_dir, CONFIG_DIR, 'umit_server.conf')
-
 # If the system is NT, try to add the InstallPathServer registry entry to the
 # Python path.
 if os.name == 'nt':
@@ -115,34 +112,22 @@ if data_dir is None and not debug_mode:
         data_dir_value, data_dir_type = _winreg.QueryValueEx(key, "DataDirServer")
         data_dir = str(data_dir_value)
 
-    if os.name == 'posix':
-        # Try to get them with base path being "/" or "/usr", else fail
-        base_path = "/usr"
-        paths_ok = True
-        if not os.path.exists(os.path.join(base_path, CONFIG_DIR)):
-            paths_ok = False
-        if not os.path.exists(os.path.join(base_path, SERVER_MISC_DIR)):
-            paths_ok = False
-
-        if paths_ok:
-            data_dir = "/usr"
-
-        if not paths_ok:
-            base_path = "/"
-            paths_ok = True
-            if not os.path.exists(os.path.join(base_path, CONFIG_DIR)):
-                paths_ok = False
-            if not os.path.exists(os.path.join(base_path, SERVER_MISC_DIR)):
-                paths_ok = False
-
-            if paths_ok:
-                data_dir = "/"
-
 
 # Get the config file path
 conf_path = None
-if data_dir is not None:
+if data_dir is not None and os.name is 'nt':
     conf_path = os.path.join(data_dir, CONFIG_DIR, 'umit_server.conf')
+if data_dir is None and os.name == 'nt':
+    print 'Error: Can\'t find configuration file'
+    sys.exit()
+
+if os.name is 'posix':
+    if not debug_mode:
+        conf_path = '/etc/umit_server.conf'
+        conf = ServerConfig(config_file_path=conf_path)
+        data_dir = conf.get(InventoryConfig.general_section, 'data_dir')
+    else:
+        conf_path = os.path.join(CONFIG_DIR, 'umit_server.conf')
 
 
 # Start the server in debug mode
@@ -270,10 +255,18 @@ def posix_exit_handler(args):
 
 if os.name == 'posix' and not debug_mode:
     from umit.inventory.Daemon import daemonize
-    daemonize('server', posix_exit_handler)
-    
-    conf = ServerConfig(config_file_path=conf_path)
 
+    # Try launching the mongo daemon if it isn't running
+    try:
+        os.system('mongod > /dev/null')
+    except:
+        pass
+
+    if not daemonize('server', posix_exit_handler):
+        print '\nERROR: Failed daemonizing.\n'
+        sys.exit()
+
+    conf = ServerConfig(config_file_path=conf_path)
     Logger.init_logger(conf, log_level=log_level, log_to_console=False)
 
     # Load the Core based on the configs.
@@ -281,10 +274,17 @@ if os.name == 'posix' and not debug_mode:
     server_core = ServerCore(conf)
 
     if admin_password is not None:
+        try:
+            server_core.set_admin_password(admin_password)
+        except:
+            pass
+
+    if admin_password is not None:
         server_core.set_admin_password(admin_password)
 
     # Run the Core.
     server_core.run()
+    logging.info('Stopped')
 
 
 if os.name not in ['nt', 'posix']:

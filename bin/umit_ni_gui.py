@@ -28,13 +28,13 @@ import pangocairo
 import atk
 import bz2
 
-if "." not in sys.path:
-    sys.path.append(".")
+if os.getcwd() not in sys.path:
+    sys.path.append(os.getcwd())
 
 from umit.inventory.gui.Configs import NIConfig
 from umit.inventory.gui.Core import NICore
 from umit.inventory.paths import CONFIG_DIR, GLADE_DIR, ICONS_DIR, GUI_MISC_DIR
-
+from umit.inventory.Configuration import InventoryConfig
 
 import pygtk
 pygtk.require("2.0")
@@ -65,19 +65,33 @@ if data_dir is None and debug_mode:
 
 # If the system is NT, try to add the InstallPathGUI registry entry to the
 # Python path.
-if os.name == 'nt':
+if os.name == 'nt' and not debug_mode:
     import _winreg
     from umit.inventory.registry_path import registry_path
 
-    try:
-        reg = _winreg.ConnectRegistry(None, _winreg.HKEY_LOCAL_MACHINE)
-        key = _winreg.OpenKey(reg, registry_path)
-        python_path_value, python_path_type =\
-            _winreg.QueryValueEx(key, 'InstallPathGUI')
-        if python_path_value not in sys.path:
-            sys.path.append(python_path_value)
-    except:
-        pass
+    reg = _winreg.ConnectRegistry(None, _winreg.HKEY_LOCAL_MACHINE)
+    key = _winreg.OpenKey(reg, registry_path)
+    python_path_value, python_path_type =\
+        _winreg.QueryValueEx(key, 'InstallPathGUI')
+    if python_path_value not in sys.path:
+        sys.path.append(python_path_value)
+
+
+# Get the config file path
+conf_path = None
+if data_dir is not None and os.name is 'nt':
+    conf_path = os.path.join(data_dir, CONFIG_DIR, 'umit_ni_gui.conf')
+if data_dir is None and os.name == 'nt':
+    print 'Error: Can\'t find configuration file'
+    sys.exit()
+
+if os.name is 'posix':
+    if not debug_mode:
+        conf_path = '/etc/umit_ni_gui.conf'
+        conf = NIConfig(config_file_path=conf_path)
+        data_dir = conf.get(InventoryConfig.general_section, 'data_dir')
+    else:
+        conf_path = os.path.join(CONFIG_DIR, 'umit_ni_gui.conf')
 
 
 # If the debug mode is off and there isn't any data directory specified,
@@ -115,12 +129,6 @@ if data_dir is None and not debug_mode:
 
             if paths_ok:
                 data_dir = "/"
-
-
-# Get the config file path
-conf_path = None
-if data_dir is not None:
-    conf_path = os.path.join(data_dir, CONFIG_DIR, 'umit_ni_gui.conf')
 
 
 # Start the GUI

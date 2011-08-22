@@ -19,15 +19,17 @@
 
 import sys
 import os
+import logging
 
-if "." not in sys.path:
-    sys.path.append(".")
+if os.getcwd()  not in sys.path:
+    sys.path.append(os.getcwd())
 
 # Used to import packaged modules dependencies when using py2exe
 if os.name == 'nt':
     import umit.inventory.modules.agent_modules
 
 from umit.inventory.agent.Configs import AgentConfig
+from umit.inventory.Configuration import InventoryConfig
 from umit.inventory.agent import Core
 from umit.inventory import Logger
 from umit.inventory.paths import CONFIG_DIR, AGENT_MISC_DIR
@@ -102,34 +104,22 @@ if data_dir is None and not debug_mode:
         data_dir_value, data_dir_type = _winreg.QueryValueEx(key, "DataDirAgent")
         data_dir = str(data_dir_value)
 
-    if os.name == 'posix':
-        # Try to get them with base path being "/" or "/usr", else fail
-        base_path = "/usr"
-        paths_ok = True
-        if not os.path.exists(os.path.join(base_path, CONFIG_DIR)):
-            paths_ok = False
-        if not os.path.exists(os.path.join(base_path, AGENT_MISC_DIR)):
-            paths_ok = False
-
-        if paths_ok:
-            data_dir = "/usr"
-
-        if not paths_ok:
-            base_path = "/"
-            paths_ok = True
-            if not os.path.exists(os.path.join(base_path, CONFIG_DIR)):
-                paths_ok = False
-            if not os.path.exists(os.path.join(base_path, AGENT_MISC_DIR)):
-                paths_ok = False
-
-            if paths_ok:
-                data_dir = "/"
-
 
 # Get the config file path
 conf_path = None
-if data_dir is not None:
+if data_dir is not None and os.name is 'nt':
     conf_path = os.path.join(data_dir, CONFIG_DIR, 'umit_agent.conf')
+if data_dir is None and os.name == 'nt':
+    print 'Error: Can\'t find configuration file'
+    sys.exit()
+
+if os.name is 'posix':
+    if not debug_mode:
+        conf_path = '/etc/umit_agent.conf'
+        conf = AgentConfig(config_file_path=conf_path)
+        data_dir = conf.get(InventoryConfig.general_section, 'data_dir')
+    else:
+        conf_path = os.path.join(CONFIG_DIR, 'umit_agent.conf')
 
 
 # Launch the agent in debug mode
@@ -236,7 +226,8 @@ def posix_exit_handler(args):
 # Run as an UNIX daemon
 if os.name == 'posix' and not debug_mode:
     from umit.inventory.Daemon import daemonize
-    daemonize('agent', posix_exit_handler)
+    if not daemonize('agent', posix_exit_handler):
+        print '\nERROR: Failed daemonizing.\n'
 
     conf = AgentConfig(config_file_path=conf_path)
 
@@ -249,6 +240,7 @@ if os.name == 'posix' and not debug_mode:
     agent_main_loop = Core.AgentMainLoop(parser, conf)
     agent_main_loop.set_data_dir(data_dir)
     agent_main_loop.run()
+    logging.info('Stopped')
 
 
 if os.name not in ['posix', 'nt']:
