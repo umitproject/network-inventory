@@ -1,0 +1,10 @@
+include bin/umit_ni_gui.py README
+include umit/*.py
+exclude umit/inventory/server/*
+exclude umit/inventory/agent/*
+exclude umit/inventory/modules/server/*
+exclude umit/inventory/modules/agent/*
+include share/umit/config/inventory/umit_ni_gui.conf
+include share/icons/umit/inventory/*
+include share/pixmaps/umit/inventory/*
+include share/umit/inventory/glade_files/*.glade

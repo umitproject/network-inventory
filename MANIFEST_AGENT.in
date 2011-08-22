@@ -1,0 +1,7 @@
+include bin/umit_ni_agent.py README
+include umit/*.py
+exclude umit/inventory/server/*
+exclude umit/inventory/gui/*
+exclude umit/inventory/modules/gui/*
+exclude umit/inventory/modules/server/*
+include share/umit/config/inventory/umit_agent.conf
