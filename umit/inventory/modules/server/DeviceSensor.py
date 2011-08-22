@@ -19,6 +19,7 @@
 from umit.inventory.server.Module import ServerModule
 from umit.inventory.server.ServerInterface import ServerInterface
 from umit.inventory.server.ServerInterfaceMessages import ResponseFields
+from umit.inventory.Configuration import InventoryConfig
 
 import logging
 import json
@@ -74,7 +75,7 @@ class DeviceSensor(ServerModule):
 
 
     def init_default_settings(self):
-        pass
+        self.options[InventoryConfig.module_enabled] = True
 
 
     def init_database_operations(self):
@@ -131,7 +132,10 @@ class DeviceSensor(ServerModule):
         if closed:
             logging.debug('DeviceSensor: Command Connection %d closed',
                           command_id)
-            return
+            message = dict()
+            message['state'] = 'DOWN'
+        else:
+            message['state'] = 'UP'
 
         response = ServerInterface.build_accepted_response(-1)
         response[ResponseFields.response_type] = 'DEVICE_SENSOR_REAL_TIME_REQUEST'

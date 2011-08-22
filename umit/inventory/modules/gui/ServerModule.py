@@ -26,9 +26,6 @@ import os
 import traceback
 from copy import copy
 
-#TODO refactoring paths
-pixbuf_paths = os.path.join('umit', 'inventory', 'gui', 'pixmaps')
-server_logo = os.path.join(pixbuf_paths, 'server_config.png')
 
 class ServerModule(Module):
 
@@ -81,13 +78,14 @@ class ServerModule(Module):
         self._init_config_values()
         self._init_config_handlers()
 
+        server_logo = self.ui_manager.get_pixmap_file_path('server_config.png')
         pixbuf = gtk.gdk.pixbuf_new_from_file(server_logo)
-        config_window_manager.add_config_page(pixbuf,\
+        config_window_manager.add_config_page(pixbuf,
                 'Notifications Server', self.config_widget)
 
 
     def _build_config_objects(self):
-        file_name = self.ui_manager.glade_files['server_config']
+        file_name = self.ui_manager.get_glade_file_path('ni_server_config.glade')
         builder = gtk.Builder()
         builder.add_from_file(file_name)
         self.config_widget = builder.get_object('ni_server_config_top')

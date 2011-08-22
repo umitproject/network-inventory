@@ -34,19 +34,6 @@ import gobject
 import traceback
 from copy import copy
 
-#TODO refactoring paths
-os_logos_path = os.path.join('umit', 'inventory', 'gui', 'pixmaps', 'os_logos')
-
-# OS logos paths
-unknown_logo_path = os.path.join(os_logos_path, 'unknown_75.png')
-default_logo_path = os.path.join(os_logos_path, 'default_75.png')
-linux_logo_path = os.path.join(os_logos_path, 'linux_75.png')
-windows_logo_path = os.path.join(os_logos_path, 'win_75.png')
-mac_logo_path = os.path.join(os_logos_path, 'maxosx_75.png')
-openbsd_logo_path = os.path.join(os_logos_path, 'openbsd_75.png')
-freebsd_logo_path = os.path.join(os_logos_path, 'freebsd_75.png')
-
-
 
 class DeviceSensorModule(Module):
 
@@ -119,21 +106,27 @@ class DeviceSensorHostView(AbstractHostsView):
             self.real_time_request_handler)
 
         self.os_id_to_pixmap_file = {
-            'windows' : windows_logo_path,
-            'linux' : linux_logo_path,
-            'freebsd' : freebsd_logo_path,
-            'openbsd' : openbsd_logo_path,
-            'mac' : mac_logo_path,
-            'other' : default_logo_path
+            'windows' : self.get_os_pixmap('win_75.png'),
+            'linux' : self.get_os_pixmap('linux_75.png'),
+            'freebsd' : self.get_os_pixmap('freebsd_75.png'),
+            'openbsd' : self.get_os_pixmap('openbsd_75.png'),
+            'mac' : self.get_os_pixmap('macosx_75.png'),
+            'other' : self.get_os_pixmap('default_75.png'),
+            'unknown' : self.get_os_pixmap('unknown_75.png'),
         }
-        
+
+
+    def get_os_pixmap(self, name):
+        return self.ui_manager.get_pixmap_file_path(name)
+
 
     def get_name(self):
         return "Host Info"
 
 
     def _build_objects(self):
-        glade_file_name = self.ui_manager.glade_files['device_sensor_hosts']
+        glade_file_name =\
+            self.ui_manager.get_glade_file_path('ni_device_sensor_host_view.glade')
         builder = gtk.Builder()
         builder.add_from_file(glade_file_name)
 
@@ -289,6 +282,17 @@ class DeviceSensorHostView(AbstractHostsView):
             self._set_recv_bps(body['recv_bps'])
         if 'sent_bps' in body_fields:
             self._set_sent_bps(body['sent_bps'])
+        if 'state' in body_fields:
+            self._set_state(body['state'])
+
+
+    def _set_state(self, state):
+        if state == 'UP':
+            markup = '<b><span foreground=\'#245900\'>UP</span></b>'
+            self.state_label.set_markup(markup)
+        if state == 'DOWN':
+            markup = '<b><span foreground=\'#B50D0D\'>DOWN</span></b>'
+            self.state_label.set_markup(markup)
 
 
     def _set_boot_time(self, boot_time):
@@ -449,12 +453,18 @@ class GraphTracker(Thread):
             gobject.idle_add(self.cpu_chart.remove_graph, 'cpu')
         if self.ram_graph is not None:
             gobject.idle_add(self.ram_chart.remove_graph, 'ram')
+            
         if self.sent_bps_graph is not None:
-            gobject.idle_add(self.sent_bps_chart.remove_graph,
-                             'sent_bps')
+            sent_has_items = len(self.sent_bps_graph.get_data()) > 1
+            if sent_has_items:
+                gobject.idle_add(self.sent_bps_chart.remove_graph,
+                                 'sent_bps')
+
         if self.recv_bps_graph is not None:
-            gobject.idle_add(self.recv_bps_chart.remove_graph,
-                             'recv_bps')
+            recv_has_items = len(self.recv_bps_graph.get_data()) > 1
+            if recv_has_items:
+                gobject.idle_add(self.recv_bps_chart.remove_graph,
+                                 'recv_bps')
 
 
     def _build_graphs(self):
@@ -484,12 +494,29 @@ class GraphTracker(Thread):
         gobject.idle_add(self.ram_chart.add_graph,
                          self.ram_graph)
         gobject.idle_add(self.ram_chart.queue_draw)
-        gobject.idle_add(self.sent_bps_chart.add_graph,
-                         self.sent_bps_graph)
-        gobject.idle_add(self.sent_bps_chart.queue_draw)
-        gobject.idle_add(self.recv_bps_chart.add_graph,
-                         self.recv_bps_graph)
-        gobject.idle_add(self.recv_bps_chart.queue_draw)
+
+        recv_has_items = len(self.recv_bps_graph.get_data()) > 1
+        if recv_has_items:
+            gobject.idle_add(self.recv_bps_chart.set_yrange, line_chart.RANGE_AUTO)
+            gobject.idle_add(self.recv_bps_chart.add_graph,
+                             self.recv_bps_graph)
+            gobject.idle_add(self.recv_bps_chart.queue_draw)
+        else:
+            gobject.idle_add(self.recv_bps_chart.set_yrange, [0, 1000])
+
+        sent_has_items = len(self.sent_bps_graph.get_data()) > 1
+        
+        if sent_has_items:
+            gobject.idle_add(self.sent_bps_chart.set_yrange, line_chart.RANGE_AUTO)
+            gobject.idle_add(self.sent_bps_chart.add_graph,
+                             self.sent_bps_graph)
+            gobject.idle_add(self.sent_bps_chart.queue_draw)
+        else:
+            gobject.idle_add(self.sent_bps_chart.set_yrange, [0, 1000])
+
+
+
+        gobject.idle_add(self.sent_bps_chart.set_yrange, line_chart.RANGE_AUTO)
 
 
     def run(self):
@@ -506,8 +533,6 @@ class GraphTracker(Thread):
             self._build_graphs()
             self._add_graphs()
             self.data_lock.release()
-
-            print self.cpu_graph.get_data()
 
             time.sleep(self.update_time)
 

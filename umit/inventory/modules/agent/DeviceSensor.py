@@ -34,6 +34,7 @@ from threading import Lock
 from umit.inventory.agent.MonitoringModule import MonitoringModule
 from umit.inventory.agent.Core import AgentNotificationParser
 from umit.inventory.common import NotificationTypes
+from umit.inventory.Configuration import InventoryConfig
 
 
 LINUX = sys.platform.lower().startswith('linux')
@@ -56,15 +57,16 @@ class DeviceSensor(MonitoringModule):
 
     # Deactivated polling time (time between checking if it got activated)
     deactivated_polling_time = 5.0
+
+    # Data file names
+    notification_cond_file = 'device_sensor_notification_cond.json'
+    report_template_file = 'device_sensor_report_template.txt'
     
     # The name of the fields in the configuration file
     test_time = 'test_time'
     report_time = 'report_time'
-    report_template_file = 'report_template_file'
-    notification_cond_file = 'notification_cond_file'
     reporting_enabled = 'reporting_enabled'
     
-
     # Module fields
     uptime = 'uptime'
     cpu_percent = 'cpu_percent'
@@ -80,17 +82,26 @@ class DeviceSensor(MonitoringModule):
         # Get configurations
         self.test_time = float(self.options[DeviceSensor.test_time])
         self.report_time = float(self.options[DeviceSensor.report_time])
-        self.report_template_file =\
-                str(self.options[DeviceSensor.report_template_file])
-        self.notification_cond_file =\
-                str(self.options[DeviceSensor.notification_cond_file])
         self.reporting_enabled = \
                 bool(self.options[DeviceSensor.reporting_enabled])
+
+        # Compute the file paths
+        misc_dir = agent_main_loop.get_misc_dir()
+        if misc_dir is None:
+            self.report_template_path = None
+            self.notification_cond_path = None
+        else:
+            self.report_template_path = os.path.join(misc_dir,
+                self.report_template_file)
+            self.notification_cond_path = os.path.join(misc_dir,
+                self.notification_cond_file)
 
         self.activated_lock = Lock()
         self.activated = False
         self.activation_request = False
         self.deactivation_request = False
+
+        self.real_time_command_handlers = []
 
         self.command_handlers = {
             'REAL_TIME_REQUEST' : self.handle_real_time_request,
@@ -133,9 +144,9 @@ class DeviceSensor(MonitoringModule):
 
     def _do_activate(self):
         self.measurement_manager = MeasurementManager()
-        self.trackers_manager = TrackersManager(self.notification_cond_file, self)
+        self.trackers_manager = TrackersManager(self.notification_cond_path, self)
         if self.reporting_enabled:
-            self.trackers_manager.parse_report_file(self.report_template_file,\
+            self.trackers_manager.parse_report_file(self.report_template_path,
                     self.report_time)
         self.activated = True
 
@@ -145,6 +156,10 @@ class DeviceSensor(MonitoringModule):
         self.measurement_manager = None
         self.trackers_manager = None
         self.activated = False
+
+        for real_time_command_handler in self.real_time_command_handlers:
+            real_time_command_handler.shutdown()
+        self.real_time_command_handlers = []
 
 
     def run(self):
@@ -179,14 +194,9 @@ class DeviceSensor(MonitoringModule):
 
     def init_default_settings(self):
         self.options[DeviceSensor.test_time] = '0.25'
-        self.options[DeviceSensor.report_time] = '10'
-        self.options[DeviceSensor.report_template_file] =\
-                os.path.abspath(os.path.join('umit', 'inventory', 'agent',\
-                'modules', 'device_sensor_report_template.txt'))
-        self.options[DeviceSensor.notification_cond_file] =\
-                os.path.abspath(os.path.join('umit', 'inventory', 'agent',\
-                'modules', 'device_sensor_notification_cond.txt'))
+        self.options[DeviceSensor.report_time] = '300'
         self.options[DeviceSensor.reporting_enabled] = False
+        self.options[InventoryConfig.module_enabled] = True
 
 
     def update(self):
@@ -210,6 +220,7 @@ class DeviceSensor(MonitoringModule):
         real_time_command_handler = RealTimeCommandHandler(command_id,\
                 command_connection, self.measurement_manager)
         real_time_command_handler.start()
+        self.real_time_command_handlers.append(real_time_command_handler)
 
 
     def handle_get_notification_cond(self, command_id, command_body,
@@ -228,7 +239,7 @@ class DeviceSensor(MonitoringModule):
                                  command_connection):
         command_connection.shutdown()
         #TODO
-    
+
 
     def handle_set_report_template(self, command_id, command_body,
                                    command_connection):

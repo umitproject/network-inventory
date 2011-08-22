@@ -18,6 +18,7 @@
 
 from umit.inventory.server.Module import SubscriberServerModule
 from umit.inventory.server.Module import ServerModule
+from umit.inventory.Configuration import InventoryConfig
 
 import json
 import httplib
@@ -63,6 +64,7 @@ class NetworkAdministratorSender(ServerModule, SubscriberServerModule):
         self.options[NetworkAdministratorSender.host] = 'ns-dev.appspot.com'
         self.options[NetworkAdministratorSender.queue_size] = 2
         self.options[NetworkAdministratorSender.wait_time] = 7.5
+        self.options[InventoryConfig.module_enabled] = False
 
 
     def receive_notification(self, notification):

@@ -29,11 +29,6 @@ import traceback
 from copy import copy
 
 
-#TODO refactoring paths
-pixbuf_paths = os.path.join('umit', 'inventory', 'gui', 'pixmaps')
-agent_logo = os.path.join(pixbuf_paths, 'agent_config.png')
-
-
 class UmitAgentModule(Module):
 
     # Agent config model columns
@@ -85,13 +80,14 @@ class UmitAgentModule(Module):
         self._init_agent_config_treeview()
         self._init_config_handlers()
 
+        agent_logo = self.ui_manager.get_pixmap_file_path('agent_config.png')
         pixbuf = gtk.gdk.pixbuf_new_from_file(agent_logo)
-        config_window_manager.add_config_page(pixbuf,\
+        config_window_manager.add_config_page(pixbuf,
                 'Umit Agents', self.config_widget)
 
 
     def _build_config_objects(self):
-        file_name = self.ui_manager.glade_files['agent_config']
+        file_name = self.ui_manager.get_glade_file_path('ni_agents_config.glade')
         builder = gtk.Builder()
         builder.add_from_file(file_name)
         self.config_widget = builder.get_object('agent_config_top')

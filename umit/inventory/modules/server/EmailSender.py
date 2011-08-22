@@ -19,6 +19,7 @@
 from umit.inventory.server.Module import SubscriberServerModule
 from umit.inventory.server.Module import ServerModule
 from umit.inventory.server.Notification import NotificationFields
+from umit.inventory.Configuration import InventoryConfig
 
 import smtplib
 from email.mime.text import MIMEText
@@ -72,6 +73,7 @@ class EmailSender(ServerModule, SubscriberServerModule):
         self.options[EmailSender.send_for] = 'CRITICAL'
         self.options[EmailSender.enable_ssl] = False
         self.options[EmailSender.enable_tls] = True
+        self.options[InventoryConfig.module_enabled] = False
 
 
     def receive_notification(self, notification):

@@ -25,6 +25,8 @@ import logging
 
 from umit.inventory.agent.MonitoringModule import MonitoringModule
 from umit.inventory.common import NotificationTypes
+from umit.inventory.Configuration import InventoryConfig
+
 
 class TestModule(MonitoringModule):
 
@@ -138,5 +140,4 @@ class TestModule(MonitoringModule):
         self.options[TestModule.message_size] = '50'
         self.options[TestModule.fields_num] = '3'
         self.options[TestModule.fields_length] = '15'
-
-
+        self.options[InventoryConfig.module_enabled] = False

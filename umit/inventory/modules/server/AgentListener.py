@@ -30,6 +30,7 @@ from umit.inventory.common import AgentMessageTypes
 from umit.inventory.common import NotificationTypes
 from umit.inventory.common import keep_alive_timeout
 from umit.inventory.common import AgentCommandFields
+from umit.inventory.Configuration import InventoryConfig
 from umit.inventory.server.Host import Host
 
 from twisted.internet import reactor
@@ -71,9 +72,9 @@ class AgentListener(ListenerServerModule, ServerModule):
     cert_expire = 316224000
 
     # SSL files
-    cert_file_name = os.path.join(tempfile.gettempdir(),\
+    cert_file_name = os.path.join(tempfile.gettempdir(),
                                   'umit_agent_server_module.cert')
-    key_file_name = os.path.join(tempfile.gettempdir(),\
+    key_file_name = os.path.join(tempfile.gettempdir(),
                                  'umit_agent_server_module.key')
 
 
@@ -213,6 +214,7 @@ class AgentListener(ListenerServerModule, ServerModule):
         self.options[AgentListener.ssl_port_option] = '20001'
         self.options[AgentListener.ssl_auth_enabled] = True
         self.options[AgentListener.udp_auth_enabled] = False
+        self.options[InventoryConfig.module_enabled] = True
 
 
     def receive_message(self, host, port, data, authenticate):

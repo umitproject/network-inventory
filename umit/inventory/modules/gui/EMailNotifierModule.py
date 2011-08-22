@@ -26,10 +26,6 @@ import gobject
 import traceback
 from copy import copy
 
-#TODO refactoring paths
-pixbuf_paths = os.path.join('umit', 'inventory', 'gui', 'pixmaps')
-email_logo = os.path.join(pixbuf_paths, 'mail_config.png')
-
 
 class EMailNotifierModule(Module):
 
@@ -51,6 +47,10 @@ class EMailNotifierModule(Module):
             mail_configs = configs['EmailSender']
 
             self.enabled = mail_configs['enabled']
+            if self.enabled in ['True', 'true']:
+                self.enabled = True
+            else:
+                self.enabled = False
             self.host = mail_configs['smtp_server_host']
             self.port = mail_configs['smtp_server_port']
             self.from_address = mail_configs['from_address']
@@ -77,13 +77,14 @@ class EMailNotifierModule(Module):
         self._init_config_values()
         self._init_config_handlers()
 
+        email_logo = self.ui_manager.get_pixmap_file_path('mail_config.png')
         pixbuf = gtk.gdk.pixbuf_new_from_file(email_logo)
-        config_window_manager.add_config_page(pixbuf,\
+        config_window_manager.add_config_page(pixbuf,
                 'E-Mail Notifier', self.config_widget)
 
 
     def _build_config_objects(self):
-        file_name = self.ui_manager.glade_files['email_config']
+        file_name = self.ui_manager.get_glade_file_path('ni_email_config.glade')
         builder = gtk.Builder()
         builder.add_from_file(file_name)
         self.config_widget = builder.get_object('email_config_top')
@@ -112,11 +113,11 @@ class EMailNotifierModule(Module):
         self.restore_button = builder.get_object('restore_button')
         self.apply_button = builder.get_object('apply_button')
 
-        self.type_to_cb_map = {'info' : self.info_cb,\
-                               'warning' : self.warning_cb,\
-                               'critical' : self.critical_cb,\
-                               'security' : self.security_cb,\
-                               'recovery' : self.recovery_cb,\
+        self.type_to_cb_map = {'info' : self.info_cb,
+                               'warning' : self.warning_cb,
+                               'critical' : self.critical_cb,
+                               'security' : self.security_cb,
+                               'recovery' : self.recovery_cb,
                                'unknown' : self.unknown_cb}
 
         # Init tree view column
@@ -141,7 +142,7 @@ class EMailNotifierModule(Module):
         self.tls_cb.set_active(bool(self.tls))
         for event_type in self.type_to_cb_map.keys():
             try:
-                self.type_to_cb_map[event_type].set_active(\
+                self.type_to_cb_map[event_type].set_active(
                         event_type in self.send_types)
             except:
                 pass
@@ -167,7 +168,7 @@ class EMailNotifierModule(Module):
         self.del_button.connect('clicked', self.on_del_button_clicked)
         self.apply_button.connect('clicked', self.on_apply_button_clicked)
         self.restore_button.connect('clicked', self.on_restore_button_clicked)
-        self.send_to_selection.connect('changed',\
+        self.send_to_selection.connect('changed',
                 self.on_send_to_selection_changed)
         self.port_entry.connect('changed', self.on_port_entry_changed)
         self.tree_view_cell.connect('edited', self.on_tree_view_cell_edited)
@@ -177,7 +178,7 @@ class EMailNotifierModule(Module):
         iter = self.send_to_model.append()
         self.send_to_model.set(iter, 0, '')
         path = self.send_to_model.get_path(iter)
-        self.send_to_treeview.set_cursor_on_cell(path, self.tree_view_col,\
+        self.send_to_treeview.set_cursor_on_cell(path, self.tree_view_col,
                                                  self.tree_view_cell, True)
 
 

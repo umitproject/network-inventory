@@ -22,6 +22,7 @@ from umit.inventory.server.Module import ServerModule
 from umit.inventory.server.Notification import Notification
 from umit.inventory.server.Notification import NotificationFields
 from umit.inventory.common import NotificationTypes
+from umit.inventory.Configuration import InventoryConfig
 
 from twisted.internet import reactor
 from twisted.internet.protocol import DatagramProtocol
@@ -85,9 +86,9 @@ class SNMPListener(ListenerServerModule, ServerModule):
             self.users[user_obj.user_name] = user_obj
 
         # TODO: delete this after testing is done:
-        test_user = SNMPv3User(user_name='test_user',\
-                auth_mode=SNMPv3User.hmac_md5_auth,\
-                priv_mode=SNMPv3User.des_priv,\
+        test_user = SNMPv3User(user_name='test_user',
+                auth_mode=SNMPv3User.hmac_md5_auth,
+                priv_mode=SNMPv3User.des_priv,
                 auth_pass='auth_pass', priv_pass='priv_pass')
         self.add_snmpv3_user(test_user)
 
@@ -96,6 +97,7 @@ class SNMPListener(ListenerServerModule, ServerModule):
         self.options[SNMPListener.port_option] = '162'
         self.options[SNMPListener.community_string] = 'public'
         self.options[SNMPListener.check_community_string] = 'True'
+        self.options[InventoryConfig.module_enabled] = True
 
 
     def receive_message(self, host, port, data):
