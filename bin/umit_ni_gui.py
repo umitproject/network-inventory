@@ -28,9 +28,13 @@ import pangocairo
 import atk
 import bz2
 
+if "." not in sys.path:
+    sys.path.append(".")
+
 from umit.inventory.gui.Configs import NIConfig
 from umit.inventory.gui.Core import NICore
 from umit.inventory.paths import CONFIG_DIR, GLADE_DIR, ICONS_DIR, GUI_MISC_DIR
+
 
 import pygtk
 pygtk.require("2.0")
@@ -38,9 +42,6 @@ pygtk.require("2.0")
 if os.name == 'nt':
     import umit.inventory.modules.gui_modules
 
-
-if "." not in sys.path:
-    sys.path.append(".")
 
 # ----- Parse arguments ------
 

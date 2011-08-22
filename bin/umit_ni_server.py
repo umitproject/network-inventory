@@ -20,6 +20,9 @@
 import sys
 import os
 
+if "." not in sys.path:
+    sys.path.append(".")
+
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.server.Core import ServerCore
 from umit.inventory import Logger
@@ -28,9 +31,6 @@ from umit.inventory.paths import CONFIG_DIR, SERVER_MISC_DIR
 # Used to import packaged modules dependencies when using py2exe
 if os.name == 'nt':
     import umit.inventory.modules.server_modules
-
-if "." not in sys.path:
-    sys.path.append(".")
 
 # Pointer to the server core
 server_core = None

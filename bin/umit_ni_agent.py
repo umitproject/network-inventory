@@ -20,6 +20,9 @@
 import sys
 import os
 
+if "." not in sys.path:
+    sys.path.append(".")
+
 # Used to import packaged modules dependencies when using py2exe
 if os.name == 'nt':
     import umit.inventory.modules.agent_modules
@@ -32,9 +35,6 @@ from umit.inventory.paths import CONFIG_DIR, AGENT_MISC_DIR
 # A pointer to the agent main loop
 agent_main_loop = None
 
-if "." not in sys.path:
-    sys.path.append(".")
-    
 # ----- Parse arguments ------
 
 # Look if the data dir was set
