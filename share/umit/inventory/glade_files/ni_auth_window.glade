@@ -6,16 +6,15 @@
     <property name="can_focus">False</property>
     <property name="title" translatable="yes">Network Inventory Authentication</property>
     <property name="resizable">False</property>
-    <property name="icon">../pixmaps/umit_48x48.png</property>
     <child>
       <object class="GtkVBox" id="vbox1">
         <property name="visible">True</property>
         <property name="can_focus">False</property>
         <child>
-          <object class="GtkImage" id="image1">
+          <object class="GtkImage" id="auth_header_image">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
-            <property name="pixbuf">../pixmaps/ni_auth_header.png</property>
+            <property name="stock">gtk-missing-image</property>
           </object>
           <packing>
             <property name="expand">False</property>
@@ -266,6 +265,7 @@
                                     <property name="can_focus">True</property>
                                     <property name="tooltip_text" translatable="yes">The Notifications Server Interface port number</property>
                                     <property name="invisible_char">●</property>
+                                    <property name="text" translatable="yes">30000</property>
                                     <property name="caps_lock_warning">False</property>
                                     <property name="primary_icon_activatable">False</property>
                                     <property name="secondary_icon_activatable">False</property>
