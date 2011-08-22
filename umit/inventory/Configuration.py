@@ -38,9 +38,12 @@ class InventoryConfig(ConfigParser):
     is_module = 'is_module'
 
 
-    def __init__(self, config_file_path=None):
+    def __init__(self, config_file_path=None, default_log_path=None):
         ConfigParser.__init__(self)
         self.config_file_path = config_file_path
+
+        if default_log_path is not None:
+            self.default_log_path = default_log_path
 
         if config_file_path is None:
             self._set_default_config_file()
@@ -222,9 +225,9 @@ class InventoryConfig(ConfigParser):
     def _set_default_settings(self):
         """Load default fail-save settings"""
         self.add_section(InventoryConfig.general_section)
-        self.set(InventoryConfig.general_section, InventoryConfig.log_path,\
+        self.set(InventoryConfig.general_section, InventoryConfig.log_path,
                  self._get_default_log_path())
-        self.set(InventoryConfig.general_section, InventoryConfig.log_level,\
+        self.set(InventoryConfig.general_section, InventoryConfig.log_level,
                  InventoryConfig.default_log_level)
 
 
