@@ -17,7 +17,13 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import logging
+import sys
 import os
+import imp
+from glob import glob
+
+from umit.inventory.paths import UMIT_NI_MODULES
+
 
 # The message delimiter used for TCP communication
 message_delimiter = '\x00\x01\x02\x03'
@@ -105,31 +111,88 @@ class AgentCommandFields:
     body = 'body'
 
 
+def load_modules_from_target(target, *module_args):
+    """
+    Target can have one of the following values:
+    * agent
+    * gui
+    * server
+    """
+    # So we won't load the same module twice
+    found_modules = []
 
-def load_module(module_name, module_path, *module_args):
-    """Loads a module with the given name from the given path."""
+    modules_objects = []
 
-    path_tokens = module_path.split(os.path.sep)
-    modname = ''
-    for path_token in path_tokens:
-        modname += path_token + '.'
-    modname += module_name
+    relative_path = os.path.join(UMIT_NI_MODULES, target)
+    # First try to load modules relative to the current directory if in sys.path
+    if '.' in sys.path:
+        load_modules_from_path(relative_path, found_modules,
+                               modules_objects, *module_args)
 
-    # Try importing from the path. If we fail at this step then the path is
-    # invalid or we don't have permissions.
+    for base_path in sys.path:
+        full_path = os.path.join(base_path, relative_path)
+        load_modules_from_path(full_path, found_modules,
+                               modules_objects, *module_args)
+
+    return modules_objects
+
+
+def load_modules_from_path(full_path, found_modules,
+                           modules_objects, *module_args):
+    # Get all module files in the directory 
+    modules_paths = glob(os.path.join(full_path, '*.py'))
+
+    for module_path in modules_paths:
+        if module_path.endswith('__init__.py'):
+            continue
+
+        # Find out the module name
+        module_name = os.path.split(module_path)[1]
+        if module_name == '':
+            continue
+
+        # Ignore the .py extension
+        module_name = module_name[:len(module_name) - 3]
+
+        # If we already found this module
+        if module_name in found_modules:
+            continue
+
+        # Try to load the found module
+        try:
+            module_obj = load_module(module_name, module_path, *module_args)
+            modules_objects.append(module_obj)
+            
+            # Save the module name for the modules we found
+            found_modules.append(module_name)
+        except:
+            logging.error('Failed loading module %s from %s',
+                          module_name, module_path, exc_info=True)
+
+
+def load_module(module_name, path, *module_args):
+    """
+    Loads a module with the given name from the given target.
+    Target can have one of the following values:
+    * agent
+    * gui
+    * server
+    """
+    logging.info('Trying to load module: %s', module_name)
+
     try:
-        module_mod = __import__(modname, globals(),\
-                locals(), [module_name], -1)
-    except Exception, e:
+        module_mod = imp.load_source(module_name, path)
+    except:
         logging.error('Corrupt module:', exc_info=True)
-        raise CorruptInventoryModule(module_name, module_path,\
+        raise CorruptInventoryModule(module_name, path,
                 CorruptInventoryModule.corrupt_path)
 
     # Try to get a reference to the class of this Module.
     try:
         mod_class = module_mod.__dict__[module_name]
     except:
-        raise CorruptInventoryModule(module_name, module_path,\
+        logging.error('Corrupt module:', exc_info=True)
+        raise CorruptInventoryModule(module_name, path,
                 CorruptInventoryModule.corrupt_file)
 
     # Return the initialized object
