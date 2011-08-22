@@ -46,7 +46,7 @@ class ServerCore:
         try:
             self.database = Database(configs)
         except:
-            logging.critical('Failed to initialize ServerCore. Shutting down.',\
+            logging.critical('Failed to initialize ServerCore. Shutting down.',
                              exc_info=True)
             self.initialized = False
             return
@@ -62,7 +62,7 @@ class ServerCore:
         self._load_modules()
         
         self.user_system = UserSystem(self.database)
-        self.server_interface = ServerInterface(self.configs,\
+        self.server_interface = ServerInterface(self.configs,
                                                 self.user_system, self.shell)
         self.shell.server_interface = self.server_interface
 
@@ -75,65 +75,54 @@ class ServerCore:
         logging.info('Initialized ServerCore')
 
 
+    def set_admin_password(self, password):
+        if not self.initialized:
+            return False
+        self.user_system.set_admin_password(password)
+        return True
+
+
     def _load_modules(self):
-        # Loads the modules as defined in the configuration file
-        modules_names = self.configs.get_modules_list()
-
         logging.info('Loading modules ...')
-        for module_name in modules_names:
-            logging.info('Trying to initialize %s ...', module_name)
-            try:
-                module_path = self.configs.module_get_option(module_name,\
-                        ServerConfig.module_path)
-                module_obj = umit.inventory.common.load_module(module_name,\
-                        module_path, self.configs, self.shell)
-
-                # Do the object the get_name() sanity check
-                try:
-                    name = module_obj.get_name()
-                except:
-                    raise CorruptServerModule(module_name, module_path,\
-                            CorruptServerModule.get_name)
-                if name != module_name:
-                    raise CorruptServerModule(module_name, module_path,\
-                            CorruptServerModule.get_name)
-
-            except Exception, e:
-                logging.error('Failed loading module %s',\
-                              module_name, exc_info=True)
-                continue
-                
-            self.modules[module_name] = module_obj
-
+        modules_objects =\
+            umit.inventory.common.load_modules_from_target('server',
+                self.configs, self.shell)
+        for module_object in modules_objects:
+            self.modules[module_object.get_name()] = module_object
         logging.info('Loaded modules')
-        
+
+
+    def _activate_modules(self):
         # Init subscriptions. This is done now because all modules must be
         # loaded and initialized before the subscribtions are done.
         logging.info('Initializing modules subscriptions ...')
         for module in self.modules.values():
             if not module.is_enabled():
                 continue
-                
             if isinstance(module, SubscriberServerModule):
                 module.subscribe()
         logging.info('Initialized modules subscriptions.')
 
         # Init the database operations for each module.
+        logging.info('Initializing modules database operations ...')
         for module in self.modules.values():
             module.init_database_operations()
+        logging.info('Done initializing modules database operations.')
 
         # Activate the modules
+        logging.info('Activating modules ...')
         for module in self.modules.values():
             if module.is_enabled():
                 module.activate()
+        logging.info('Done activating modules.')
 
 
     def update_configs(self, configs):
         try:
-            logging.info('Updating configurations.\n%s',\
+            logging.info('Updating configurations.\n%s',
                          json.dumps(configs, sort_keys=True, indent=4))
         except:
-            logging.warning('Invalid configuration change request',\
+            logging.warning('Invalid configuration change request',
                             exc_info=True)
 
         try:
@@ -155,13 +144,15 @@ class ServerCore:
             # Save the settings
             self.configs.save_settings()
         except:
-            logging.error('Changing server configurations failed',\
+            logging.error('Changing server configurations failed',
                           exc_info=True)
 
 
     def run(self):
         if not self.initialized:
             return
+        
+        self._activate_modules()
 
         # Call the modules which implement ListenerServerModule so they
         # will start listening.
@@ -174,6 +165,14 @@ class ServerCore:
         
         logging.info('Starting the Twisted Reactor')
         reactor.run()
+
+
+    def shutdown(self):
+        for module in self.modules.values():
+            if module.is_enabled():
+                module.deactivate()
+            module.shutdown()
+        reactor.stop()
 
 
 

@@ -133,11 +133,11 @@ class Database:
             return
 
         if not isinstance(notification, Notification):
-            logging.debug('%s is not of Notification class',\
+            logging.debug('%s is not of Notification class',
                           notification.fields)
             return
 
-        logging.debug('############# STORING #########\n%s',\
+        logging.debug('############# STORING #########\n%s',
                       json.dumps(notification.fields, sort_keys=True, indent=4))
 
         # Saving a copy since mongodb will add the ObjectID to the dictionary
@@ -154,11 +154,11 @@ class Database:
         """
         self.hosts_collection_lock.acquire()
 
-        if self.find(self.hosts_collection_name,\
+        if self.find(self.hosts_collection_name,
                      {Host.hostname : host.hostname}).count() == 1:
-            self.update(self.hosts_collection_name,\
-                        {Host.hostname : host.hostname},\
-                        {Host.ipv4_addr : host.ipv4_addr,\
+            self.update(self.hosts_collection_name,
+                        {Host.hostname : host.hostname},
+                        {Host.ipv4_addr : host.ipv4_addr,
                          Host.ipv6_addr : host.ipv6_addr})
         else:
             self.insert(self.hosts_collection_name, host.to_db_object())
@@ -180,7 +180,7 @@ class Database:
     def get_host(self, hostname):
         """ Get the host object with the given hostname """
         self.hosts_collection_lock.acquire()
-        host_list = self.find(self.hosts_collection_name,\
+        host_list = self.find(self.hosts_collection_name,
                               {Host.hostname : hostname})
         self.hosts_collection_lock.release()
         if type(host_list) is list:

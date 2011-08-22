@@ -22,8 +22,6 @@ from umit.inventory.Configuration import InventoryConfig
 
 class ServerConfig(InventoryConfig):
 
-    file_path = os.path.join('umit', 'inventory', 'server', 'umit_server.conf')
-
     # Default values
     default_interface_port = '30000'
     default_force_interface_encrypt = False
@@ -38,55 +36,27 @@ class ServerConfig(InventoryConfig):
         InventoryConfig._set_default_settings(self)
 
         # General settings
-        self.set(InventoryConfig.general_section,\
-                ServerConfig.interface_port,\
+        self.set(InventoryConfig.general_section,
+                ServerConfig.interface_port,
                 str(ServerConfig.default_interface_port))
-        self.set(InventoryConfig.general_section,\
-                 ServerConfig.force_interface_encrypt,\
+        self.set(InventoryConfig.general_section,
+                 ServerConfig.force_interface_encrypt,
                  str(ServerConfig.default_force_interface_encrypt))
-    
-        # Module default settings
-        # !! TODO - refactor this is another place. This should be added trough
-        # !! a ServerCore add_module() method.
-        self.add_section('AgentListener')
-        self.set('AgentListener', InventoryConfig.module_path,
-                os.path.join('umit', 'inventory', 'server', 'modules'))
-        self.set('AgentListener', InventoryConfig.module_enabled, True)
-        self.set('AgentListener', InventoryConfig.is_module, True)
-
-        self.add_section('SNMPListener')
-        self.set('SNMPListener', InventoryConfig.module_path,
-                os.path.join('umit', 'inventory', 'server', 'modules'))
-        self.set('SNMPListener', InventoryConfig.module_enabled, True)
-        self.set('SNMPListener', InventoryConfig.is_module, True)
-
-        self.add_section('EmailSender')
-        self.set('EmailSender', InventoryConfig.module_path,
-                os.path.join('umit', 'inventory', 'server', 'modules'))
-        self.set('EmailSender', InventoryConfig.module_enabled, False)
-        self.set('EmailSender', InventoryConfig.is_module, True)
-
-        self.add_section('DeviceSensor')
-        self.set('DeviceSensor', InventoryConfig.module_path,
-                os.path.join('umit', 'inventory', 'server', 'modules'))
-        self.set('DeviceSensor', InventoryConfig.module_enabled, True)
-        self.set('DeviceSensor', InventoryConfig.is_module, True)
-
-        self.add_section('NetworkAdministratorSender')
-        self.set('NetworkAdministratorSender', InventoryConfig.module_path,
-                os.path.join('umit', 'inventory', 'server', 'modules'))
-        self.set('NetworkAdministratorSender', InventoryConfig.module_enabled, False)
-        self.set('NetworkAdministratorSender', InventoryConfig.is_module, True)
 
         self.add_section('Database')
 
 
     def _set_default_config_file(self):
         """Sets the default configuration file"""
-        self.config_file_path = ServerConfig.file_path
+        if os.name == 'nt':
+            self.config_file_path = 'umit_server.conf'
+        else:
+            self.config_file_path = '/etc/umit_server.conf'
 
 
     def _get_default_log_path(self):
+        if hasattr(self, 'default_log_path'):
+            return self.default_log_path
         if os.name == 'posix':
             return os.path.abspath('/var/log/umit-notifications-server/')
         else:

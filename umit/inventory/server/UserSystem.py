@@ -25,7 +25,6 @@ class UserSystem:
     # The collection where the user information is saved
     collection_name = 'user_system_users'
 
-
     def __init__(self, database):
         self.database = database
         self.users = dict()
@@ -33,14 +32,10 @@ class UserSystem:
 
         users_temp = self.database.find(UserSystem.collection_name)
         for user in users_temp:
-            self.users[user[User.username]] = User(user[User.username],\
-                    UserPermissions.deserialize(user[User.permissions]),\
-                    md5_password=user[User.md5_pass])
+            self.users[user[User.username_field]] = User(user[User.username_field],
+                    UserPermissions.deserialize(user[User.permissions_field]),
+                    md5_password=user[User.md5_pass_field])
         logging.info('Initialized User System.')
-
-        # TODO delete after testing
-        self.users['guest'] = User('guest', UserPermissions(True, True, True, True),
-                                   password='guest')
 
 
     def get_user(self, username):
@@ -48,6 +43,14 @@ class UserSystem:
         if username in self.users:
             return self.users[username]
         return None
+
+
+    def set_admin_password(self, password):
+        if 'admin' in self.users.keys():
+            self.set_user('admin', password=password)
+        else:
+            self.add_user('admin', password=password,
+                          permissions=UserPermissions(True, True, True, True))
 
 
     def add_user(self, username, password, permissions):
@@ -59,7 +62,7 @@ class UserSystem:
         self.users[username] = user_obj
 
         # Add to database
-        self.database.insert(user_obj.serialize())
+        self.database.insert(self.collection_name, user_obj.serialize())
 
 
     def del_user(self, username):
@@ -80,16 +83,16 @@ class UserSystem:
 
         if password is not None:
             user_obj.set_password(password)
-            updated_fields[User.md5_pass] = user_obj.md5_password
+            updated_fields[User.md5_pass_field] = user_obj.md5_password
 
         if permissions is not None:
             user_obj.permissions = permissions
-            updated_fields[User.permissions] = permissions
+            updated_fields[User.permissions_field] = permissions
 
         # If we actually updated password/permissions or both
         if len(updated_fields) > 0:
             self.database.update(UserSystem.collection_name,
-                                 {User.username : username}, updated_fields)
+                                 {User.username_field : username}, updated_fields)
 
 
     def validate_user(self, username, password):
@@ -109,9 +112,9 @@ class User:
     """ A user in the Server User System """
 
     # Database fields
-    username = 'username'
-    md5_pass = 'md5_pass'
-    permissions = 'permissions'
+    username_field = 'username'
+    md5_pass_field = 'md5_pass'
+    permissions_field = 'permissions'
 
 
     def __init__(self, username, permissions, md5_password=None, password=None):
@@ -176,17 +179,17 @@ class User:
 
     def serialize(self):
         serialized_obj = dict()
-        serialized_obj[User.username] = self.username
-        serialized_obj[User.md5_pass] = self.md5_password
-        serialized_obj[User.permissions] = self.permissions.serialize()
+        serialized_obj[User.username_field] = self.username
+        serialized_obj[User.md5_pass_field] = self.md5_password
+        serialized_obj[User.permissions_field] = self.permissions.serialize()
         return serialized_obj
 
 
     @staticmethod
     def deserialize(self, db_object):
-        return User(db_object[User.username],\
-                    UserPermissions.deserialize(db_object[User.permissions]),\
-                    md5_password=db_object[User.md5_pass])
+        return User(db_object[User.username_field],
+                    UserPermissions.deserialize(db_object[User.permissions_field]),
+                    md5_password=db_object[User.md5_pass_field])
 
 
 
@@ -214,7 +217,7 @@ class UserPermissions:
     set_configs = 'set_configs'
     hosts = 'hosts'
 
-    def __init__(self, manage_users=False, restart_server=False,\
+    def __init__(self, manage_users=False, restart_server=False,
                  get_configs=True, set_configs=False, hosts=list()):
         try:
             self.manage_users = bool(manage_users)
@@ -239,10 +242,10 @@ class UserPermissions:
     @staticmethod
     def deserialize(db_obj):
         try:
-            return UserPermissions(db_obj[UserPermissions.manage_users],\
-                                   db_obj[UserPermissions.restart_server],\
-                                   db_obj[UserPermissions.get_configs],\
-                                   db_obj[UserPermissions.set_configs],\
+            return UserPermissions(db_obj[UserPermissions.manage_users],
+                                   db_obj[UserPermissions.restart_server],
+                                   db_obj[UserPermissions.get_configs],
+                                   db_obj[UserPermissions.set_configs],
                                    db_obj[UserPermissions.hosts])
         except:
             logging.debug('Invalid UserPermissions db object', exc_info=True)

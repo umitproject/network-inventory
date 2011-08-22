@@ -33,17 +33,24 @@ class ServerModule:
         self.options = dict()
         self.init_default_settings()
 
+        # Set the module specific options
+        self.options[InventoryConfig.is_module] = True
+        self.options[InventoryConfig.module_enabled] = True
+
         # Get the options from the configs and save them
+        if not self.configs.has_section(self.get_name()):
+            self.configs.add_section(self.get_name())
+        
         module_options = self.configs.options(self.get_name())
         for option in module_options:
             self.options[option] = self.configs.get(self.get_name(), option)
 
         # Save the configurations
         for option_name in self.options.keys():
-            self.configs.set(self.get_name(), option_name,\
+            self.configs.set(self.get_name(), option_name,
                              self.options[option_name])
 
-        logging.info('Initialized module %s with options:\n%s', self.get_name(),\
+        logging.info('Initialized module %s with options:\n%s', self.get_name(),
                      json.dumps(self.options, sort_keys=True, indent=4))
 
         if self.is_enabled():
@@ -60,7 +67,7 @@ class ServerModule:
         pass
 
 
-    def deactive(self):
+    def deactivate(self):
         """
         Called when the module is disabled.
         Should be implemented.
