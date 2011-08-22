@@ -771,6 +771,8 @@ class AgentTracker(Thread):
             notif_type = NotificationTypes.warning
             self.shell.raise_notification(description, short_description,\
                     notif_type, False, ipv4_addr, ipv6_addr, hostname)
+            self.agents_info[hostname].command_port = -1
+            self.agents_info[hostname].last_keep_alive = -1
 
         # Update the authentication data
         try:
