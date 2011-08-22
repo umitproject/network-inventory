@@ -1,0 +1,64 @@
+#! /bin/sh
+
+if [ "$(whoami)" != "root" ]
+then
+    echo "Administrator privileges required"
+    exit
+fi
+
+StartServer()
+{
+    echo -n "Starting Umit Network Inventory Server Daemon"
+    %s > /dev/null
+}
+
+StopServer()
+{
+    # Kill the server
+    echo "Trying to delete old server instance ..."
+    server_pid=$(cat /tmp/umit_ni_server_pidfile)
+    if [ $? -eq 0 ]
+    then
+        echo "Found old server instance with pid $server_pid"
+        echo
+        echo "Killing old server instance ..."
+
+        kill $server_pid
+        if [ $? -eq 0 ]
+        then
+            echo "Killed old server instance"
+        else
+            echo "Failed to kill old server instance. Try killing it manually."
+        fi
+
+        echo
+        echo "Deleting pidfile ..."
+        rm -rf /tmp/umit_ni_server_pidfile
+        if [ $? -eq 0 ]
+        then
+            echo "Deleted pidfile"
+        else
+            echo "Failed deleting pidfile"
+        fi
+    else
+        echo "Server old instance not found."
+    fi
+}
+
+case "$1" in
+  start)
+        StartServer
+        ;;
+  stop)
+        StopServer
+        ;;
+  restart)
+        StopServer
+        StartServer
+        ;;
+  *)
+        echo "Usage: umit_ni_serverd {start|stop|restart}"
+        exit 1
+esac
+
+exit 0

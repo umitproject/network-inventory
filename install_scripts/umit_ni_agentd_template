@@ -1,0 +1,65 @@
+#! /bin/sh
+
+if [ "$(whoami)" != "root" ]
+then
+    echo "Administrator privileges required"
+    exit
+fi
+
+StartAgent()
+{
+    echo -n "Starting Umit Network Inventory Agent Daemon"
+    %s > /dev/null
+}
+
+StopAgent()
+{
+    # Kill the agent
+    echo "Trying to delete old agent instance ..."
+    agent_pid=$(cat /tmp/umit_ni_agent_pidfile)
+    if [ $? -eq 0 ]
+    then
+        echo "Found old agent instance with pid $agent_pid"
+        echo
+        echo "Killing old agent instance ..."
+
+        kill $agent_pid
+        if [ $? -eq 0 ]
+        then
+            echo "Killed old agent instance"
+        else
+            echo "Failed to kill old agent instance. Try killing it manually."
+        fi
+
+        echo
+        echo "Deleting pidfile ..."
+        rm -rf /tmp/umit_ni_agent_pidfile
+        if [ $? -eq 0 ]
+        then
+            echo "Deleted pidfile"
+        else
+            echo "Failed deleting pidfile"
+        fi
+    else
+        echo "Agent old instance not found."
+    fi
+}
+
+case "$1" in
+  start)
+        StartAgent
+        ;;
+  stop)
+        StopAgent
+        ;;
+  restart)
+        StopAgent
+        StartAgent
+        ;;
+  *)
+        echo "Usage: umit_ni_agentd {start|stop|restart}"
+        exit 1
+esac
+
+
+exit 0
