@@ -19,7 +19,6 @@
 
 import sys
 import os
-import servicemanager
 
 from umit.inventory.server.Configs import ServerConfig
 from umit.inventory.server.Core import ServerCore
@@ -102,8 +101,6 @@ if os.name == 'nt':
     except:
         pass
 
-servicemanager.LogInfoMsg('sys.path!! %s' % str(sys.path))
-servicemanager.LogInfoMsg('sys.argv!! %s' % str(sys.argv))
 
 # If the debug mode is off and there isn't any data directory specified,
 # try to get them from a platform dependent location.
@@ -173,11 +170,7 @@ if debug_mode:
 
 if os.name == 'nt' and not debug_mode:
     from umit.inventory.Service import UmitService
-    import servicemanager
-    servicemanager.LogInfoMsg('Entered umit_ni_server')
-    file_path = os.path.abspath(os.path.dirname(__file__))
-    servicemanager.LogInfoMsg(str(file_path))
-    servicemanager.LogInfoMsg(str(os.getcwd()))
+
     
     class UmitServerService(UmitService):
 
@@ -189,14 +182,12 @@ if os.name == 'nt' and not debug_mode:
         _file = __file__
 
         def start(self):
-            servicemanager.LogInfoMsg('Entered start()... %s' % str(data_dir))
             # Try to start the mongo service in case it wasn't started by Windows
             try:
                 UmitService.start_service('MongoDB')
             except:
                 pass
             log_path = os.path.join(data_dir, 'logs')
-            servicemanager.LogInfoMsg('Finished. Log path: %s' % str(log_path))
             conf = ServerConfig(config_file_path=conf_path,
                                 default_log_path=log_path)
 
@@ -246,13 +237,10 @@ if os.name == 'nt' and not debug_mode:
 
     if 'start' in sys.argv:
         print 'Starting Umit Server Service ...'
-        servicemanager.LogInfoMsg('Entered start argv')
         try:
-            servicemanager.LogInfoMsg('Trying to start service')
             UmitService.start_service(UmitServerService._svc_name_)
             print 'Umit Server Service started succesfully'
         except:
-            servicemanager.LogInfoMsg('Failed starting service')
             import traceback
             traceback.print_exc()
             print '\nStarting service FAILED'

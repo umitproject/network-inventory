@@ -38,7 +38,6 @@ pygtk.require("2.0")
 if os.name == 'nt':
     import umit.inventory.modules.gui_modules
 
-sys.path.append('C:\Windows\System32')
 
 if "." not in sys.path:
     sys.path.append(".")

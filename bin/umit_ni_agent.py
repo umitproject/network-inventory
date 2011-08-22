@@ -37,9 +37,6 @@ if "." not in sys.path:
     
 # ----- Parse arguments ------
 
-import servicemanager
-servicemanager.LogInfoMsg('sysargv: %s' % str(sys.argv))
-
 # Look if the data dir was set
 data_dir = None
 for arg in sys.argv:
@@ -155,13 +152,8 @@ if debug_mode:
 # Run as a Windows Service
 if os.name == 'nt' and not debug_mode:
     from umit.inventory.Service import UmitService
-    #import win32serviceutil
-    import servicemanager
-    servicemanager.LogInfoMsg('Entered umit_ni_agent')
-    file_path = os.path.abspath(os.path.dirname(__file__))
-    servicemanager.LogInfoMsg(str(file_path))
-    servicemanager.LogInfoMsg(str(os.getcwd()))
 
+    
     class UmitAgentService(UmitService):
         
         _svc_name_ = 'umitagent'
@@ -171,30 +163,23 @@ if os.name == 'nt' and not debug_mode:
         _file = __file__
         
         def start(self):
-            servicemanager.LogInfoMsg('Entered start1()')
             # The Agent Configurations. See umit/inventory/agent/Configs.py
             # for details regarding the configuration file location and default
             # settings.
-            servicemanager.LogInfoMsg(str(conf_path))
             log_path = os.path.join(data_dir, 'logs')
             conf = AgentConfig(config_file_path=conf_path,
                                default_log_path=log_path)
-            servicemanager.LogInfoMsg('Setting default log path to %s' % log_path)
-            servicemanager.LogInfoMsg('Made confs ...')
 
             # Init the logging
             Logger.init_logger(conf, log_level=log_level, log_to_console=True)
-            servicemanager.LogInfoMsg('Inited logger ..')
             # The message Parser which will encrypt (if specified) and send the
             # messages.
             parser = Core.AgentNotificationParser(conf)
-            servicemanager.LogInfoMsg('Inited parser')
 
             # The agent main loop
             self.agent_main_loop = Core.AgentMainLoop(parser, conf)
             self.agent_main_loop.set_data_dir(data_dir)
             self.agent_main_loop.run()
-            servicemanager.LogInfoMsg('Finished running ...')
 
         def stop(self):
             if hasattr(self, 'agent_main_loop'):
@@ -217,7 +202,6 @@ if os.name == 'nt' and not debug_mode:
 
     if 'start' in sys.argv:
         print 'Starting Umit Agent Service ...'
-        servicemanager.LogInfoMsg('Got start command')
         try:
             UmitService.start_service(UmitAgentService._svc_name_)
             print 'Umit Agent Service started succesfully'

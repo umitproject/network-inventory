@@ -52,9 +52,7 @@ class UmitService(win32serviceutil.ServiceFramework):
         try:
             self.ReportServiceStatus(win32service.SERVICE_RUNNING)
             logging.info('Starting service main loop')
-            servicemanager.LogInfoMsg('Entering start()')
             self.start()
-            servicemanager.LogInfoMsg('Exiting start()')
             logging.info('Finished service main loop')
 
             logging.info('Waiting for service to stop')
