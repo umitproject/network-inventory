@@ -21,6 +21,7 @@ import logging
 import json
 
 from umit.inventory.agent.Core import AgentNotificationParser
+from umit.inventory.Configuration import InventoryConfig
 
 
 class MonitoringModule(Thread):
@@ -41,11 +42,18 @@ class MonitoringModule(Thread):
         self.daemon = True
         self.name = self.get_name()
         self.configs = configs
+        self.data_dir = agent_main_loop.data_dir
+
+        # Set the is_module option
+        self.options[InventoryConfig.is_module] = True
 
         # Get the options from the configs and save them
+        if not configs.has_section(self.get_name()):
+            configs.add_section(self.get_name())
+    
         module_config_options = configs.options(self.get_name())
         for option_name in module_config_options:
-            self.options[option_name] = configs.get(self.get_name(),\
+            self.options[option_name] = configs.get(self.get_name(),
                                                     option_name)
 
         # Store the configurations
@@ -54,13 +62,22 @@ class MonitoringModule(Thread):
             configs.set(self.get_name(), option_name, option_value)
 
         # Log the configurations
-        logging.info('Initialized modue %s with configurations:\n%s',\
-                     self.get_name(),\
+        logging.info('Initialized module %s with configurations:\n%s',
+                     self.get_name(),
                      json.dumps(self.options, sort_keys=True, indent=4))
 
         # Save the agent Main Loop which will get the Module's messages
         self.agent_main_loop = agent_main_loop
 
+
+    def get_data_dir(self):
+        """
+        Called to find out the directory where the Umit NI data files are
+        installed.
+        Returns: The path of the data files or None if no such path.
+        """
+        return self.data_dir
+    
 
     def activate(self):
         """
@@ -83,7 +100,7 @@ class MonitoringModule(Thread):
         raise MonitoringModule.NotImplemented('get_name')
 
 
-    def handle_command(self, command, command_id, command_body,\
+    def handle_command(self, command, command_id, command_body,
                        command_connection):
         """
         A command for this module was received. The module should handle the
@@ -131,7 +148,7 @@ class MonitoringModule(Thread):
             prefixed_field_key = self.get_prefix() + '_' + field_key
             prefixed_fields[prefixed_field_key] = fields[field_key]
 
-        notification = AgentNotificationParser.encode(message, short_message,\
+        notification = AgentNotificationParser.encode(message, short_message,
                 msg_type, prefixed_fields, is_report, self.get_name())
         self.agent_main_loop.add_message(notification)
 
@@ -139,6 +156,15 @@ class MonitoringModule(Thread):
     def run(self):
         """The Monitoring module main loop. Must be implemented."""
         raise MonitoringModule.NotImplemented('run')
+
+
+    def shutdown(self):
+        """
+        The Core asks the Monitoring module to shutdown. Should be used for
+        clean-up procedures.
+        Should be implemented.
+        """
+        pass
     
 
     def init_default_settings(self):

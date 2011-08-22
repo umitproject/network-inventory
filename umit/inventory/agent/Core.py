@@ -35,6 +35,7 @@ from umit.inventory import common
 from umit.inventory.common import message_delimiter
 from umit.inventory.common import keep_alive_timeout
 from umit.inventory.Configuration import InventoryConfig
+from umit.inventory.paths import AGENT_MISC_DIR
 
 
 class AgentMainLoop:
@@ -51,12 +52,14 @@ class AgentMainLoop:
         # method and are stored in the added_message_queue. Before parsing
         # the messages with _parse_messages(), the added_message_queue will 
         # be copied to the parsing_message_queue and be flushed.
+        self.data_dir = None
         self.parsing_message_queue = []
         self.added_message_queue = []
         self.added_message_queue_lock = threading.Lock()
         self.received_messages = False
         self.message_parser = message_parser
         self.modules = []
+        self.activated_modules = []
         self.conf = configurations
         self.keep_alive_timer = time.time()
 
@@ -65,14 +68,15 @@ class AgentMainLoop:
         self.command_connections_lock = threading.Lock()
 
         # Mapping command names to functions
-        self.command_functions = {'GET_CONFIGS' : self.handle_get_configs,\
-                                  'SET_CONFIGS' : self.handle_set_configs,\
-                                  'RESTART' : self.handle_restart,\
-                                  'CLOSE_CONNECTION' : self.handle_close_connection,\
+        self.command_functions = {'GET_CONFIGS' : self.handle_get_configs,
+                                  'SET_CONFIGS' : self.handle_set_configs,
+                                  'RESTART' : self.handle_restart,
+                                  'CLOSE_CONNECTION' : self.handle_close_connection,
                                   }
         
         # If we should shutdown
-        self.shutdown = False
+        self.should_shutdown = False
+        self.shutdown_lock = threading.Lock()
 
         # Get the polling time for the loop
         self.polling_time =\
@@ -107,6 +111,20 @@ class AgentMainLoop:
             # Method returns False in case of a fatal error
             if not self.message_parser.parse(message):
                 self.shutdown = True
+
+
+    def set_data_dir(self, data_dir):
+        self.data_dir = data_dir
+
+
+    def get_data_dir(self):
+        return self.data_dir
+
+
+    def get_misc_dir(self):
+        if self.data_dir is None:
+            return None
+        return os.path.join(self.data_dir, AGENT_MISC_DIR)
 
 
     def add_message(self, message):
@@ -268,31 +286,8 @@ class AgentMainLoop:
         try:
             # Load up the modules
             logging.info('Loading up the modules ...')
-            modules_names = self.conf.get_modules_list()
-            for module_name in modules_names:
-                try:
-                    module_path = self.conf.module_get_option(module_name,\
-                            AgentConfig.module_path)
-                    module_obj = common.load_module(module_name,\
-                            module_path, self.conf, self)
-
-                    # Do a sanity check to test the module is correct
-                    try:
-                        module_name = module_obj.get_name()
-                    except:
-                        raise CorruptAgentModule(module_name, module_path,\
-                                CorruptAgentModule.get_name)
-                    if module_name != module_obj.get_name():
-                        raise CorruptAgentModule(module_name, module_path,\
-                                CorruptAgentModule.get_name)
-        
-                except Exception, e:
-                    logging.error('Loading failed for module %s',\
-                                 module_name, exc_info=True)
-                    continue
-
-                logging.info('Loaded module %s', module_obj.get_name())
-                self.modules.append(module_obj)
+            self.modules = common.load_modules_from_target('agent',
+                    self.conf, self)
             logging.info('Done loading modules.')
 
             # Store the modules configurations
@@ -309,10 +304,11 @@ class AgentMainLoop:
             logging.info('Activating modules ...')
             # Activate the modules
             for module in self.modules:
-                module_enabled = self.conf.get(module.get_name(),\
+                module_enabled = self.conf.get(module.get_name(),
                         InventoryConfig.module_enabled)
                 if module_enabled:
                     module.activate()
+                    self.activated_modules.append(module)
             logging.info('Done activating modules.')
 
             # Send the keep-alive message
@@ -323,11 +319,14 @@ class AgentMainLoop:
             # The actual main loop
             logging.info('Starting the Agent Main Loop ...')
             while True:
-                if self.shutdown:
+                self.shutdown_lock.acquire()
+                if self.should_shutdown:
+                    self.shutdown_lock.release()
                     # Send the going-down message
                     self.message_parser.send_going_down()
                     logging.info('Shutting down ...')
                     break
+                self.shutdown_lock.release()
 
                 # Test if we should send the keep-alive message
                 if self.keep_alive_timer + keep_alive_timeout < time.time():
@@ -350,6 +349,62 @@ class AgentMainLoop:
         except KeyboardInterrupt:
             return
 
+
+    def shutdown(self):
+        # Deactivate the modules
+        logging.info('Deactivating modules ...')
+        for module in self.activated_modules:
+            logging.info('Deactivating module %s ...', module.get_name())
+            try:
+                module.deactivate()
+            except:
+                logging.info('Failed deactivating module %s', module.get_name())
+                continue
+            logging.info('Deactivated module %s.', module.get_name())
+
+        # Shutdown the modules
+        logging.info('Shutting down modules ...')
+        for module in self.modules:
+            logging.info('Shutting down module %s ...', module.get_name())
+            try:
+                module.shutdown()
+            except:
+                logging.info('Failed shutting down module %s', module.get_name())
+                continue
+            logging.info('Shut down module %s.', module.get_name())
+
+        # Close the command listener
+        logging.info('Shutting down Command Listener ...')
+        self.command_listener.shutdown()
+        logging.info('Shut down Command Listener.')
+
+        # Close the activated command connections
+        logging.info('Shutting down command connections ...')
+        self.command_connections_lock.acquire()
+        for command_connection in self.command_connections:
+            logging.info('Shutting down command connection with %s:%s ...',
+                         command_connection.peer_host,
+                         command_connection.peer_port)
+
+            self.command_connections_lock.release()
+            command_connection.shutdown()
+            self.command_connections_lock.acquire()
+
+            
+            logging.info('Shut down command connection with %s:%s.',
+                         command_connection.peer_host,
+                         command_connection.peer_port)
+
+        self.command_connections_lock.release()
+        logging.info('Shut down command connections.')
+
+        self.conf.save_settings()
+
+        self.shutdown_lock.acquire()
+        self.should_shutdown = True
+        self.shutdown_lock.release()
+
+        
 
 class AgentNotificationParser:
     """ Will send the notifications to the Notifications Server """
@@ -648,9 +703,12 @@ class CommandListener(threading.Thread):
 
     def _accept_connections(self):
         if not self.ssl_files_generated:
-            return
+            return False
         logging.info('Core: Accepting command connections ...')
-        conn, addr = self.command_socket.accept()
+        try:
+            conn, addr = self.command_socket.accept()
+        except:
+            return False
         peer_host = addr[0]
         peer_port = addr[1]
         data_socket = ssl.wrap_socket(conn, server_side=True,\
@@ -664,6 +722,8 @@ class CommandListener(threading.Thread):
         command_connection.start()
         self.main_loop.add_command_connection(command_connection)
 
+        return True
+
 
     def get_command_port(self):
         return self.command_port
@@ -672,6 +732,7 @@ class CommandListener(threading.Thread):
     def shutdown(self):
         self.shutdown_lock.acquire()
         self.should_shutdown = True
+        self.command_socket.close()
         self.shutdown_lock.release()
 
 
@@ -686,7 +747,8 @@ class CommandListener(threading.Thread):
                 break
             self.shutdown_lock.release()
         
-            self._accept_connections()
+            if not self._accept_connections():
+                break
             
 
 
