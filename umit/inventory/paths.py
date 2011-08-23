@@ -19,6 +19,7 @@
 import os
 
 BIN_DIRNAME = 'bin'
+INSTALL_SCRIPTS = 'install_scripts'
 AGENT_BIN = os.path.join(BIN_DIRNAME, 'umit_ni_agent.py')
 SERVER_BIN = os.path.join(BIN_DIRNAME, 'umit_ni_server.py')
 GUI_BIN = os.path.join(BIN_DIRNAME, 'umit_ni_gui.py')

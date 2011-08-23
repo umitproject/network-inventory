@@ -231,7 +231,7 @@ class Database:
         updated_fields: A dict with the new values for the fields specified
         as keys.
         """
-        self.database[collection_name].update(spec_fields, updated_fields)
+        self.database[collection_name].update(spec_fields, {'$set' :updated_fields})
 
 
     def remove(self, collection_name, spec_fields=None):
