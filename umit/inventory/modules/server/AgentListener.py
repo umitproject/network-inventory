@@ -468,7 +468,8 @@ class AgentListener(ListenerServerModule, ServerModule):
 
         username = add_user_request.get_username()
         password = add_user_request.get_password()
-        self.del_user(username)
+        logging.info('########## %s %s', username, password)
+        self.add_user(username, password)
         response = ServerInterface.build_accepted_response(req_id)
         data_connection.send_message(json.dumps(response), True)
 

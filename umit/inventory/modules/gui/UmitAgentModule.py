@@ -78,7 +78,11 @@ class UmitAgentModule(Module):
         self._init_host_combo()
         self._init_config_values()
         self._init_agent_config_treeview()
+        self._init_users_tree_view()
         self._init_config_handlers()
+
+        self.shell.send_request(AgentGetUsersRequest(
+            self.shell.username, self.shell.password, self))
 
         agent_logo = self.ui_manager.get_pixmap_file_path('agent_config.png')
         pixbuf = gtk.gdk.pixbuf_new_from_file(agent_logo)
@@ -104,8 +108,12 @@ class UmitAgentModule(Module):
         self.agent_apply_button = builder.get_object('agent_apply_button')
         self.module_restore_button = builder.get_object('module_restore_button')
         self.module_apply_button = builder.get_object('module_apply_button')
-
-        self.config_notebook.remove_page(-1)
+        self.users_tree_view = builder.get_object('users_tree_view')
+        self.add_user_button = builder.get_object('add_user_button')
+        self.del_user_button = builder.get_object('del_user_button')
+        self.del_user_button.set_sensitive(False)
+        self.add_user_button.set_sensitive(False)
+        
         self.select_button.set_sensitive(False)
         self.agent_apply_button.set_sensitive(False)
         self.agent_restore_button.set_sensitive(False)
@@ -165,6 +173,21 @@ class UmitAgentModule(Module):
         cell.connect('edited', self.on_agent_config_value_cell_edited)
 
 
+    def _init_users_tree_view(self):
+        self.tree_view_cell = gtk.CellRendererText()
+        self.tree_view_col = gtk.TreeViewColumn('Username', self.tree_view_cell)
+        self.tree_view_col.set_property('resizable', False)
+        self.tree_view_col.add_attribute(self.tree_view_cell, 'text', 0)
+        self.users_tree_view.append_column(self.tree_view_col)
+
+        # Init to addresses tree view
+        self.users_tree_model = gtk.ListStore(gobject.TYPE_STRING)
+        self.users_tree_view.set_headers_visible(False)
+        self.users_tree_view.set_model(self.users_tree_model)
+
+        self.users_tree_view_selection = self.users_tree_view.get_selection()
+
+
     def tree_view_option_name_data_func(self, column, cell, model, iter):
         # Get option or section name
         name = model.get_value(iter, self.AGENT_CONFIG_MODEL_COL_NAME)
@@ -212,8 +235,45 @@ class UmitAgentModule(Module):
         self.host_combo.connect('changed', self.on_host_combo_changed)
         self.config_treeview.connect('row-activated',\
                 self.on_config_treeview_row_activated)
+        self.add_user_button.connect('clicked', self.on_add_user_button_clicked)
+        self.del_user_button.connect('clicked', self.on_del_user_button_clicked)
+        self.users_tree_view_selection.connect('changed',
+                self.on_users_tree_view_selection_changed)
 
-        
+
+    def on_users_tree_view_selection_changed(self, selection):
+        model, selected_rows = selection.get_selected_rows()
+
+        if len(selected_rows) is 0:
+            self.del_user_button.set_sensitive(False)
+        else:
+            self.del_user_button.set_sensitive(True)
+
+
+    def on_add_user_button_clicked(self, button):
+        add_user_dialog = AddUserDialog(self.shell, self.ui_manager,
+                self.users_tree_model, self.config_window_manager.config_window)
+        add_user_dialog.show()
+
+
+    def on_del_user_button_clicked(self, button):
+        model, selected_paths =\
+                self.users_tree_view_selection.get_selected_rows()
+
+        selected_rows = list()
+        for selected_path in selected_paths:
+            selected_rows.append(gtk.TreeRowReference(model, selected_path))
+
+        for selected_row in selected_rows:
+            path = selected_row.get_path()
+            iter = model.get_iter(path)
+            username = model.get_value(iter, 0)
+            request = AgentDelUserRequest(self.shell.username, self.shell.password,
+                                          username)
+            self.shell.send_request(request)
+            model.remove(iter)
+
+
     def on_module_apply_button_clicked(self, module_apply_button):
         # Get the values
         self.udp_port = int(self.udp_port_entry.get_text())
@@ -393,7 +453,23 @@ class UmitAgentModule(Module):
             self.config_window_manager.show_error(error_msg, error_title)
 
         self.select_button.set_sensitive(True)
-        
+
+
+    def agent_get_users_error(self):
+        # TODO - maybe show an error
+        pass
+
+
+    def agent_get_users_success(self, usernames):
+        try:
+            for username in usernames:
+                iter = self.users_tree_model.append()
+                self.users_tree_model.set(iter, 0, username)
+            self.add_user_button.set_sensitive(True)
+        except:
+            # TODO - maybe show an error
+            pass
+
 
     def add_notebook_page(self, notebook):
         """
@@ -430,6 +506,61 @@ class UmitAgentModule(Module):
         """
         return None
 
+
+
+class AddUserDialog:
+
+    def __init__(self, shell, ui_manager, users_tree_model, parent_window):
+        self.shell = shell
+        self.ui_manager = ui_manager
+        self.users_tree_model = users_tree_model
+        self.parent_window = parent_window
+
+
+    def show(self):
+        file_name = self.ui_manager.get_glade_file_path('ni_add_agent_user_window.glade')
+        builder = gtk.Builder()
+        builder.add_from_file(file_name)
+        self.window = builder.get_object('ni_add_agent_user_window')
+        self.add_user_button = builder.get_object('add_user_button')
+        self.cancel_button = builder.get_object('cancel_button')
+        self.username_entry = builder.get_object('username_entry')
+        self.password_entry = builder.get_object('password_entry')
+
+        # Connect the handlers
+        self.add_user_button.connect('clicked', self.on_add_user_button_clicked)
+        self.cancel_button.connect('clicked', self.on_cancel_button_clicked)
+
+        self.window.set_transient_for(self.parent_window)
+        icon = self.parent_window.get_icon()
+        self.window.set_icon(icon)
+        self.window.set_modal(True)
+        self.window.show()
+
+
+    def on_add_user_button_clicked(self, button):
+        # Test the user isn't already in the model
+        iter = self.users_tree_model.get_iter_first()
+        while iter is not None:
+            username = self.users_tree_model.get_value(iter, 0)
+            if username == self.username_entry.get_text():
+                self.window.destroy()
+                return
+            iter = self.users_tree_model.iter_next(iter)
+
+        iter = self.users_tree_model.append()
+        self.users_tree_model.set(iter, 0, self.username_entry.get_text())
+
+        request = AgentAddUserRequest(self.shell.username, self.shell.password,
+                self.username_entry.get_text(), self.password_entry.get_text())
+        self.shell.send_request(request)
+        
+        self.window.destroy()
+
+
+    def on_cancel_button_clicked(self, button):
+        self.window.destroy()
+    
 
 
 class AgentGetConfigsRequest(Request):
@@ -500,3 +631,67 @@ class AgentSetConfigsRequest(Request):
             gobject.idle_add(self.agent_module.agent_configs_error,\
                              self.hostname)
             return
+
+
+
+class AgentAddUserRequest(Request):
+
+    def __init__(self, username, password, added_username, added_password):
+
+        agent_request_body = dict()
+        agent_request_body['agent_username'] = added_username
+        agent_request_body['agent_password'] = added_password
+
+        agent_request = dict()
+        agent_request['agent_request_type'] = 'ADD_USER'
+        agent_request['agent_request_body'] = agent_request_body
+
+        Request.__init__(self, username, password, agent_request,\
+                            'AgentListener')
+
+
+
+class AgentDelUserRequest(Request):
+
+    def __init__(self, username, password, deleted_username):
+
+        agent_request_body = dict()
+        agent_request_body['agent_username'] = deleted_username
+
+        agent_request = dict()
+        agent_request['agent_request_type'] = 'DEL_USER'
+        agent_request['agent_request_body'] = agent_request_body
+
+        Request.__init__(self, username, password, agent_request,\
+                            'AgentListener')
+
+
+
+class AgentGetUsersRequest(Request):
+
+    def __init__(self, username, password, agent_module):
+        self.agent_module = agent_module
+
+        agent_request = dict()
+        agent_request['agent_request_type'] = 'GET_USERS'
+        agent_request['agent_request_body'] = dict()
+
+        Request.__init__(self, username, password, agent_request,\
+                            'AgentListener')
+
+
+    def handle_response(self, response):
+        try:
+            response_code = response['response_code']
+            if response_code != 200:
+                gobject.idle_add(self.agent_module.agent_get_users_error)
+                return
+
+            response_body = response['body']
+            usernames = response_body['usernames']
+        except:
+            traceback.print_exc()
+            gobject.idle_add(self.agent_module.agent_get_users_error)
+            return
+
+        gobject.idle_add(self.agent_module.agent_get_users_success, usernames)
