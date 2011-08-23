@@ -77,6 +77,21 @@ if os.name == 'nt' and not debug_mode:
         sys.path.append(python_path_value)
 
 
+
+# If the debug mode is off and there isn't any data directory specified,
+# try to get them from a platform dependent location.
+if data_dir is None and not debug_mode:
+    if os.name == 'nt':
+        # Get it from registry
+        import _winreg
+        from umit.inventory.registry_path import registry_path
+
+        reg = _winreg.ConnectRegistry(None, _winreg.HKEY_LOCAL_MACHINE)
+        key = _winreg.OpenKey(reg, registry_path)
+        data_dir_value, data_dir_type = _winreg.QueryValueEx(key, "DataDirGUI")
+        data_dir = str(data_dir_value)
+
+
 # Get the config file path
 conf_path = None
 if data_dir is not None and os.name is 'nt':
@@ -92,43 +107,6 @@ if os.name is 'posix':
         data_dir = conf.get(InventoryConfig.general_section, 'data_dir')
     else:
         conf_path = os.path.join(CONFIG_DIR, 'umit_ni_gui.conf')
-
-
-# If the debug mode is off and there isn't any data directory specified,
-# try to get them from a platform dependent location.
-if data_dir is None and not debug_mode:
-    if os.name == 'nt':
-        # Get it from registry
-        import _winreg
-        from umit.inventory.registry_path import registry_path
-
-        reg = _winreg.ConnectRegistry(None, _winreg.HKEY_LOCAL_MACHINE)
-        key = _winreg.OpenKey(reg, registry_path)
-        data_dir_value, data_dir_type = _winreg.QueryValueEx(key, "DataDirGUI")
-        data_dir = str(data_dir_value)
-
-    if os.name == 'posix':
-        # Try to get them with base path being "/" or "/usr", else fail
-        base_path = "/usr"
-        paths_ok = True
-        if not os.path.exists(os.path.join(base_path, CONFIG_DIR)):
-            paths_ok = False
-        if not os.path.exists(os.path.join(base_path, GUI_MISC_DIR)):
-            paths_ok = False
-
-        if paths_ok:
-            data_dir = "/usr"
-
-        if not paths_ok:
-            base_path = "/"
-            paths_ok = True
-            if not os.path.exists(os.path.join(base_path, CONFIG_DIR)):
-                paths_ok = False
-            if not os.path.exists(os.path.join(base_path, GUI_MISC_DIR)):
-                paths_ok = False
-
-            if paths_ok:
-                data_dir = "/"
 
 
 # Start the GUI

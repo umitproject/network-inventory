@@ -28,7 +28,8 @@ DefaultGroupName={#MyAppName}
 LicenseFile=LICENSE
 OutputBaseFilename=umit_ni_agent_v{#MyAppVersion}_setup
 Compression=lzma                             
-SetupIconFile=share\icons\umit\inventory\umit_48.ico
+SetupIconFile=share\icons\umit\inventory\umit_48.ico      
+AlwaysRestart=yes
 SolidCompression=yes
 PrivilegesRequired=admin
 ; ======= Change this to your network inventory dir =======
