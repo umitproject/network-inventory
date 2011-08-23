@@ -63,12 +63,12 @@ class EmailSender(ServerModule, SubscriberServerModule):
 
 
     def init_default_settings(self):
-        self.options[EmailSender.server_host] = 'smtp.gmail.com'
+        self.options[EmailSender.server_host] = ''
         self.options[EmailSender.server_port] = 587
-        self.options[EmailSender.from_addr] = 'dragosdena2@gmail.com'
-        self.options[EmailSender.login] = 'dragosdena2@gmail.com'
-        self.options[EmailSender.to_list] = 'dena_dr89@yahoo.com,dragos.dena@gmail.com'
-        self.options[EmailSender.password] = 'guestpassword'
+        self.options[EmailSender.from_addr] = ''
+        self.options[EmailSender.login] = ''
+        self.options[EmailSender.to_list] = ''
+        self.options[EmailSender.password] = ''
         self.options[EmailSender.enable_html] = True
         self.options[EmailSender.send_for] = 'CRITICAL'
         self.options[EmailSender.enable_ssl] = False
